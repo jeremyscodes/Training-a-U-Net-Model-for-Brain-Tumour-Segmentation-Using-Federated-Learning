@@ -48,12 +48,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.model = get_model()
     
     def get_parameters(self, config):
-        print("get_parameters_______________") #This is where i need to convert the weights
-        # Is this back from GPU
-        # Is it numpy array
-        #tensorflow command get weights mean, average of weights gpu
-            #then check if weights trained before and after training
-        #numpy average cpu
+        print("get_parameters_______________") 
+        
         return self.model.get_weights()
 
     def fit(self, parameters, config):
@@ -134,8 +130,8 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
 
     # Aggregate and return custom metrics (weighted average)
     return {
-        "iou_score": sum(dice_coef) / sum(examples),
-        "f1_score": sum(soft_dice_coef) / sum(examples)
+        "dice_coef": sum(dice_coef) / sum(examples),
+        "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
     }
 
 
