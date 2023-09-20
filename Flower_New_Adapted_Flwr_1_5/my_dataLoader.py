@@ -37,6 +37,12 @@ class DatasetGenerator(Sequence):
         self.num_files = len(self.filenames)
         
         self.ds = self.get_dataset()
+        self._generator = None
+    def get_generator(self):
+        """Lazy initialization of the generator."""
+        if self._generator is None:
+            self._generator = self.generate_batch_from_files()
+        return self._generator    
 
     def preprocess_img(self, img):
         """
@@ -209,6 +215,8 @@ class DatasetGenerator(Sequence):
             if idx >= len(self.filenames):
                 idx = 0
                 np.random.shuffle(self.filenames) # Shuffle the filenames for the next iteration
+
+            pass
                 
 
     def get_input_shape(self):
@@ -400,6 +408,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
 
 
         # Initialize DatasetGenerator for training and validation
+        
         ds_train_gen = DatasetGenerator(file_names_train, 
                                         batch_size=batch_size,
                                         crop_dim=[crop_dim, crop_dim], 
