@@ -63,8 +63,8 @@ class FlowerClient(fl.client.NumPyClient):
         epochs = config['local_epochs']
         #do local training
         model_filename, model_callbacks = self.model.get_callbacks() 
-        train_generator = self.trainloader.get_generator()
-        self.model.fit(train_generator, epochs=epochs, validation_data=self.valloader,  verbose=2, callbacks=model_callbacks)
+        train_dataset = self.trainloader.get_tf_dataset() # Wrapped dataset for serialization
+        self.model.fit(train_dataset, epochs=epochs, validation_data=self.valloader,  verbose=2, callbacks=model_callbacks)
         print("from client fit: len(self.trainloader)=",len(self.trainloader))
         return self.model.get_weights(), len(self.trainloader), {} # for sending anything (like run time or metrics) to server
 
@@ -74,8 +74,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.model.set_weights(parameters)
         model_filename, model_callbacks = self.model.get_callbacks() 
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here'
-        val_generator = self.valloader.get_generator()
-        loss, dice_coef, soft_dice_coef = self.model.evaluate(model_filename, self.val_generator)
+        val_dataset = self.valloader.get_tf_dataset()
+        loss, dice_coef, soft_dice_coef = self.model.evaluate(model_filename, val_dataset)
 
         return float(loss), len(self.valloader), {'dice_coef':dice_coef, 'soft_dice_coef':soft_dice_coef}
 
@@ -97,7 +97,7 @@ def get_client_fn(trainloaders, valloaders):
         print(type(trainloader=trainloaders[int(cid)]))
         return FlowerClient(trainloader=trainloaders[int(cid)],
                             valloader=valloaders[int(cid)],
-                            )#backbone=backbone,encoder_weights=encoder_weights,
+                            )
 
     return client_fn
 

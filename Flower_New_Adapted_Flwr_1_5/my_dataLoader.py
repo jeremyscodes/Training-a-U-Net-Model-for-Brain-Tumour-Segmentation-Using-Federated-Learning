@@ -2,7 +2,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import numpy as np
 from  keras.utils import Sequence
-
+import tensorflow as tf
 #from tqdm import tqdm, trange
 
 #From 2D unet github dataloader.py
@@ -37,12 +37,16 @@ class DatasetGenerator(Sequence):
         self.num_files = len(self.filenames)
         
         self.ds = self.get_dataset()
-        self._generator = None
-    def get_generator(self):
-        """Lazy initialization of the generator."""
-        if self._generator is None:
-            self._generator = self.generate_batch_from_files()
-        return self._generator    
+    
+    def get_tf_dataset(self):
+        return tf.data.Dataset.from_generator(
+            self.generate_batch_from_files,  # Your existing generator function
+            output_signature=(
+                tf.TensorSpec(shape=(128, 128, 128, 1), dtype=tf.float32), 
+                tf.TensorSpec(shape=(128, 128, 128, 4), dtype=tf.float32)
+            )
+        ).batch(self.batch_size)
+
 
     def preprocess_img(self, img):
         """
@@ -216,7 +220,7 @@ class DatasetGenerator(Sequence):
                 idx = 0
                 np.random.shuffle(self.filenames) # Shuffle the filenames for the next iteration
 
-            pass
+            
                 
 
     def get_input_shape(self):
@@ -413,12 +417,17 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                                         batch_size=batch_size,
                                         crop_dim=[crop_dim, crop_dim], 
                                         augment=True, seed=seed)
+
         ds_val_gen = DatasetGenerator(file_names_val, 
                                       batch_size=batch_size,crop_dim=[crop_dim, crop_dim], 
                                       augment=False, seed=seed)
 
-        trainloaders.append(ds_train_gen)
-        valloaders.append(ds_val_gen)
+        # Convert to tf.data.Dataset
+        tf_train_dataset = ds_train_gen.get_tf_dataset()
+        tf_val_dataset = ds_val_gen.get_tf_dataset()
+
+        trainloaders.append(tf_train_dataset)
+        valloaders.append(tf_val_dataset)
 
     # Convert test files to actual data
     print("now for test dataloader")
@@ -430,7 +439,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-    return trainloaders, valloaders, testloader
+    tf_test_dataset = testloader.get_tf_dataset()
+    return trainloaders, valloaders, tf_test_dataset
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September
 def count_images_in_loader(loader, batch_size):
@@ -441,16 +451,13 @@ def count_images_in_loader(loader, batch_size):
     return total_images
 def main():
     trainloaders, valloaders, testloader = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
-    print("traingloaders=",len(trainloaders), "valloaders=",len(valloaders), "testloaders=",len(testloader))
-    print("traingloaders=",len(trainloaders[0]), "valloaders=",len(valloaders[0]))
-    print("traingloaders=",len(trainloaders[1]), "valloaders=",len(valloaders[1]))
-    print("_"*30)
+
     # Counting images in trainloaders and valloaders for each client
-    for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
-        print(f"Client {idx + 1}:")
-        print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
-        print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
-        print("----------------------")
+    # for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
+    #     print(f"Client {idx + 1}:")
+    #     print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
+    #     print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
+    #     print("----------------------")
 
     # Counting images in testloader
     print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
