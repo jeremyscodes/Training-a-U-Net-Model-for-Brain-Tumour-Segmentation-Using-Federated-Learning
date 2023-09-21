@@ -392,15 +392,11 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     valloaders = []
 
     for client_set in client_sets:
-        print("new set")
         # Split into training and validation
         train_val_partitions = split_into_train_val(client_set, val_ratio)  
         #print("partitions[0]")
-        print(train_val_partitions[0])
-        print(type(train_val_partitions[0]))
         # Extract file names from each DataFrame in partitions[0] and concatenate them
         # file_names_train = [fname for tup in train_val_partitions[0] for fname in tup[1]['paths'].tolist()]
-        print(train_val_partitions[0].columns)
 
         file_names_train = train_val_partitions[0]['path'].tolist()
         file_names_train = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_train]
@@ -449,16 +445,16 @@ def count_images_in_loader(loader, batch_size):
         # Using the shape of the batch data to count images
         total_images += batch[0].shape[0]
     return total_images
-def main():
-    trainloaders, valloaders, testloader = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
+# def main():
+#     trainloaders, valloaders, testloader = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
 
-    # Counting images in trainloaders and valloaders for each client
-    # for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
-    #     print(f"Client {idx + 1}:")
-    #     print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
-    #     print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
-    #     print("----------------------")
+#     # Counting images in trainloaders and valloaders for each client
+#     # for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
+#     #     print(f"Client {idx + 1}:")
+#     #     print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
+#     #     print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
+#     #     print("----------------------")
 
-    # Counting images in testloader
-    print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
-if __name__ == "__main__": main()
+#     # Counting images in testloader
+#     print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
+# if __name__ == "__main__": main()

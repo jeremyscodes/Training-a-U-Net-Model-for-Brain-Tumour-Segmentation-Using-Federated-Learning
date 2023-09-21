@@ -49,11 +49,14 @@ class FlowerClient(fl.client.NumPyClient):
     
     def get_parameters(self, config):
         print("get_parameters_______________") 
-        
-        return self.model.get_weights()
+        param = self.model.get_weights()
+        print("Param type: ",type(param))
+        return param
 
     def fit(self, parameters, config):
-        print("fit_______________")
+        print("fit()_______________")
+        print(parameters.shape)
+        print(type(parameters))
         #parameters is a list of numpy arrays representing the weights of the global model
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
@@ -71,6 +74,8 @@ class FlowerClient(fl.client.NumPyClient):
     def evaluate(self, parameters, config):
         print("evaluate_______________")
         # get global model to be evaluated on client's validation data
+        print(parameters.shape)
+        print(type(parameters))
         self.model.set_weights(parameters)
         model_filename, model_callbacks = self.model.get_callbacks() 
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here'
@@ -116,7 +121,6 @@ def get_model():
     
     # model = unet_model.create_model(
     #            ds_train.get_input_shape(), ds_train.get_output_shape())
-
     return unet_model
 
 def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
@@ -164,8 +168,7 @@ def main(cfg: DictConfig) -> None:
     # 1. Load Data
     trainloaders, valloaders, testloader = load_datasets(cfg.num_clients, cfg.batch_size)
     print("Data Loaded")
-    # GOT HERE with no errors :) use conda activate temp_fl
-    
+   
 
     # Create FedAvg strategy
     strategy = fl.server.strategy.FedAvg(
