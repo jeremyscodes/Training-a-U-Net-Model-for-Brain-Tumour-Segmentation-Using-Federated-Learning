@@ -5,6 +5,29 @@ from  keras.utils import Sequence
 import tensorflow as tf
 #from tqdm import tqdm, trange
 
+#test loader (dummy)
+
+class SimpleDataGenerator:
+    def __init__(self, batch_size, num_batches):
+        self.batch_size = batch_size
+        self.num_batches = num_batches
+
+    def generate_data(self):
+        for _ in range(self.num_batches):
+            X = np.random.rand(self.batch_size, 128, 128, 128, 1).astype(np.float32)
+            y = np.random.randint(0, 2, (self.batch_size, 128, 128, 128, 4)).astype(np.float32)
+            yield X, y
+
+    def get_tf_dataset(self):
+        return tf.data.Dataset.from_generator(
+            self.generate_data,
+            output_signature=(
+                tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 1), dtype=tf.float32),
+                tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 4), dtype=tf.float32),
+            )
+        )
+
+
 #From 2D unet github dataloader.py
 class DatasetGenerator(Sequence):
     """
