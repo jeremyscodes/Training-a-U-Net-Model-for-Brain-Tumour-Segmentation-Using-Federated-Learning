@@ -49,7 +49,8 @@ class FlowerClient(fl.client.NumPyClient):
     
     def get_parameters(self, config):
         print("get_parameters_______________") 
-        param = self.model.get_weights()
+        # TODO : convert to numpyFor example, if you have a TensorFlow tensor tensor, you can convert it to a NumPy array using tensor.numpy(). However, be cautious about the dtype variant tensors, as they can't be directly converted.
+        param = self.model.get_weights().numpy()
         print("Param type: ",type(param))
         return param
 
@@ -64,7 +65,6 @@ class FlowerClient(fl.client.NumPyClient):
         #do local training
         model_filename, model_callbacks = self.model.get_callbacks() 
         train_dataset = self.trainloader.get_tf_dataset() # Wrapped dataset for serialization
-        # TODO This is wheere i might need the tf_dataset wrapper
         self.model.fit(train_dataset, epochs=epochs, validation_data=self.valloader,  verbose=2, callbacks=model_callbacks)
         print("from client fit: len(self.trainloader)=",len(self.trainloader))
         return self.model.get_weights(), len(self.trainloader), {} # for sending anything (like run time or metrics) to server
@@ -78,7 +78,6 @@ class FlowerClient(fl.client.NumPyClient):
         model_filename, model_callbacks = self.model.get_callbacks() 
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
         val_dataset = self.valloader.get_tf_dataset()
-        # TODO This is wheere i might need the tf_dataset wrapper
         loss, dice_coef, soft_dice_coef = self.model.evaluate(val_dataset, verbose=2)
 
         return float(loss), len(self.valloader), {'dice_coef':dice_coef, 'soft_dice_coef':soft_dice_coef}
