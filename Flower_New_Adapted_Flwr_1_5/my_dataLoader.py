@@ -467,8 +467,9 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
 
         # Convert to tf.data.Dataset (wrapper for serialization)
         #warning("")
-        tf_train_dataset = ds_train_gen#.get_tf_dataset()
-        tf_val_dataset = ds_val_gen#.get_tf_dataset()
+        tf_train_dataset = ds_train_gen.get_tf_dataset()
+        tf_val_dataset = ds_val_gen.get_tf_dataset()
+        # NOTE : I have added get_tf_Dataset() since the model (manually trained) was able to train. And now in flower it needs to be serializable
         #NOTE : I have removed get_tf_dataset() in order to test if the model loads without the serialized added code
         trainloaders.append(tf_train_dataset)
         valloaders.append(tf_val_dataset)
@@ -484,7 +485,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-    tf_test_dataset = testloader#.get_tf_dataset()
+    tf_test_dataset = testloader.get_tf_dataset()
+    # NOTE : I have added get_tf_Dataset() since the model (manually trained) was able to train. And now in flower it needs to be serializable
     #NOTE : I have removed get_tf_dataset() in order to test if the model loads without the serialized added code
         
     return trainloaders, valloaders, tf_test_dataset

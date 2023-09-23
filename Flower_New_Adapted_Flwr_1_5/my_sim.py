@@ -2,10 +2,10 @@ print("Running")
 
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
-# import flwr as fl
-# from typing import Dict, List, Tuple
-# from flwr.common import Metrics
-# from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
+import flwr as fl
+from typing import Dict, List, Tuple
+from flwr.common import Metrics
+from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 
 import sys
 sys.path.insert(1,'/home-mscluster/jstott/Research_Code/unet_model_serialized')
@@ -36,7 +36,7 @@ parser.add_argument(
     default=0.0,
     help="Ratio of GPU memory to assign to a virtual client",
 )
-'''
+
 #
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self,trainloader,valloader)->None:
@@ -44,11 +44,8 @@ class FlowerClient(fl.client.NumPyClient):
         print("FlowerClient init_______________")
         self.trainloader = trainloader
         self.valloader = valloader
-        x_train, y_train = trainloader
-        imgs_shape = x_train.shape[1:]
-        msks_shape = y_train.shape[1:]
         #Instatiate the model that will be trained
-        self.model = get_model(imgs_shape,msks_shape)
+        self.model = get_model(trainloader)
     
     def get_parameters(self, config):
         print("get_parameters_______________") 
@@ -67,6 +64,7 @@ class FlowerClient(fl.client.NumPyClient):
         #do local training
         model_filename, model_callbacks = self.model.get_callbacks() 
         train_dataset = self.trainloader.get_tf_dataset() # Wrapped dataset for serialization
+        # TODO This is wheere i might need the tf_dataset wrapper
         self.model.fit(train_dataset, epochs=epochs, validation_data=self.valloader,  verbose=2, callbacks=model_callbacks)
         print("from client fit: len(self.trainloader)=",len(self.trainloader))
         return self.model.get_weights(), len(self.trainloader), {} # for sending anything (like run time or metrics) to server
@@ -78,9 +76,10 @@ class FlowerClient(fl.client.NumPyClient):
         print(type(parameters))
         self.model.set_weights(parameters)
         model_filename, model_callbacks = self.model.get_callbacks() 
-        'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here'
+        'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
         val_dataset = self.valloader.get_tf_dataset()
-        loss, dice_coef, soft_dice_coef = self.model.evaluate(model_filename, val_dataset)
+        # TODO This is wheere i might need the tf_dataset wrapper
+        loss, dice_coef, soft_dice_coef = self.model.evaluate(val_dataset, verbose=2)
 
         return float(loss), len(self.valloader), {'dice_coef':dice_coef, 'soft_dice_coef':soft_dice_coef}
 
@@ -106,10 +105,11 @@ def get_client_fn(trainloaders, valloaders):
 
     return client_fn
 
-def get_model(imgs_shape,msks_shape):
+def get_model(client_set):
    u_net = unet()
-   return u_net.create_model(imgs_shape, msks_shape, final=False) # TODO refactor FlowerClient to get trainloaders, and then get msks_shape from there
-
+   model= u_net.create_model(client_set.get_input_shape(),client_set.get_output_shape() , final=False)
+   return model
+    
 def get_evaluate_fn(testset):
     print("get_evaluated_fn_______________")
 
@@ -118,7 +118,7 @@ def get_evaluate_fn(testset):
 
     # The `evaluate` function will be called after every round by the strategy
     def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar],):
-        model = get_model()  # Construct the model
+        model = get_model(testset)  # Construct the model
         print("About to set weights_________________")
         model.set_weights(parameters)  # Update model with the latest parameters
         print("Finished setting weights_______________")
@@ -144,7 +144,7 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
         "dice_coef": sum(dice_coef) / sum(examples),
         "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
     }
-'''
+
 def main(cfg: DictConfig) -> None:
     
     print("Hello?")
@@ -157,8 +157,11 @@ def main(cfg: DictConfig) -> None:
     # 1. Load Data
     trainloaders, valloaders, testloader = load_datasets(cfg.num_clients, cfg.batch_size)
     print("Data Loaded")
+    
+    
+    '''
+    #Example of how to load, and train
     client1 = trainloaders[0]
-
     u_net = unet()
     model= u_net.create_model(client1.get_input_shape(),client1.get_output_shape() , final=False) 
     # TODO refactor FlowerClient to get trainloaders, and then get msks_shape from there
@@ -171,12 +174,8 @@ def main(cfg: DictConfig) -> None:
     train_dataset = trainloaders[0]#.get_tf_dataset() # Wrapped dataset for serialization
     print("Fitting")
     model.fit(train_dataset, epochs=1, validation_data=valloaders[0],  verbose=2, callbacks=model_callbacks)
+    '''
     
-    
-    # print("weights type")
-    # print(type(model.get_weights()))
-    # print(model.get_weights())
-    return 0
 
     # Create FedAvg strategy
     strategy = fl.server.strategy.FedAvg(
@@ -210,6 +209,7 @@ def main(cfg: DictConfig) -> None:
             # does nothing if `num_gpus` in client_resources is 0.0
         },
     )
+    
     print("Got to end of uncommented code")
     
     '''
