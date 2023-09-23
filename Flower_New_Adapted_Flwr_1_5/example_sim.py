@@ -39,13 +39,16 @@ VERBOSE = 0
 
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self, x_train, y_train, x_val, y_val) -> None:
+        # Extract input and output shapes from training data
+        imgs_shape = x_train.shape[1:]
+        msks_shape = y_train.shape[1:]
         # Create model
-        self.model = get_model()
+        self.model = get_model(imgs_shape,msks_shape)
         self.x_train, self.y_train = x_train, y_train
         self.x_val, self.y_val = x_val, y_val
 
     def get_parameters(self, config):
-        return self.model.get_weights()
+        return self.model.get_weights()#.numpy()?
 
     def fit(self, parameters, config):
         self.model.set_weights(parameters)
@@ -96,12 +99,12 @@ def get_dummy_model(input_shape=(28, 28, 1), num_classes=1):
 
     
     return model
-def get_model():
+def get_model(imgs_shape,msks_shape):
    u_net = unet()
    return u_net.create_model(imgs_shape, msks_shape, final=False) # TODO refactor FlowerClient to get trainloaders, and then get msks_shape from there
 
 
-def get_client_fn(dataset_partitions):
+def get_client_fn(trainloaders, valloaders):
     """Return a function to construc a client.
 
     The VirtualClientEngine will exectue this function whenever a client is sampled by
@@ -110,34 +113,14 @@ def get_client_fn(dataset_partitions):
 
     def client_fn(cid: str) -> fl.client.Client:
         """Construct a FlowerClient with its own dataset partition."""
-
         # Extract partition for client with id = cid
-        x_train, y_train = dataset_partitions[int(cid)]
-        # Use 10% of the client's training data for validation
-        split_idx = math.floor(len(x_train) * 0.9)
-        x_train_cid, y_train_cid = (
-            x_train[:split_idx],
-            y_train[:split_idx],
-        )
-        x_val_cid, y_val_cid = x_train[split_idx:], y_train[split_idx:]
+        x_train, y_train = trainloaders[int(cid)]
+        x_val, y_val = valloaders[int(cid)]
 
         # Create and return client
-        return FlowerClient(x_train_cid, y_train_cid, x_val_cid, y_val_cid)
-
+        return FlowerClient(x_train, y_train, x_val, y_val)
+        
     return client_fn
-
-
-def partition_mnist():
-    """Download and partitions the MNIST dataset."""
-    (x_train, y_train), testset = tf.keras.datasets.mnist.load_data()
-    partitions = []
-    # We keep all partitions equal-sized in this example
-    partition_size = math.floor(len(x_train) / NUM_CLIENTS)
-    for cid in range(NUM_CLIENTS):
-        # Split dataset into non-overlapping NUM_CLIENT partitions
-        idx_from, idx_to = int(cid) * partition_size, (int(cid) + 1) * partition_size
-        partitions.append((x_train[idx_from:idx_to] / 255.0, y_train[idx_from:idx_to]))
-    return partitions, testset
 
 
 def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
@@ -153,9 +136,9 @@ def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
     return {"accuracy": sum(accuracies) / sum(examples)}
 
 
-def get_evaluate_fn(testset):
+def get_evaluate_fn(testloader):
     """Return an evaluation function for server-side (i.e. centralised) evaluation."""
-    x_test, y_test = testset
+    print("Test Loader")
 
     # The `evaluate` function will be called after every round by the strategy
     def evaluate(
@@ -165,8 +148,8 @@ def get_evaluate_fn(testset):
     ):
         model = get_model()  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, accuracy = model.evaluate(x_test, y_test, verbose=VERBOSE)
-        return loss, {"accuracy": accuracy}
+        loss, accuracy = model.evaluate(testloader, verbose=VERBOSE)
+        return loss, {"accuracy": accuracy} # TODO change metrics
 
     return evaluate
 
@@ -176,8 +159,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # Create dataset partitions (needed if your dataset is not pre-partitioned)
-    partitions, testset = partition_mnist()
-    print("Loaded mnist")
+    # partitions, testset = partition_mnist()
+    print("Running")
     trainloaders, valloaders, testloader = load_datasets(2, 20)
     print("Loaded BRaTS")
 
@@ -191,7 +174,7 @@ def main() -> None:
             NUM_CLIENTS * 0.75
         ),  # Wait until at least 75 clients are available
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
-        evaluate_fn=get_evaluate_fn(testset),  # global evaluation function
+        evaluate_fn=get_evaluate_fn(testloader),  # global evaluation function
     )
 
     # With a dictionary, you tell Flower's VirtualClientEngine that each
@@ -203,7 +186,7 @@ def main() -> None:
 
     # Start simulation
     fl.simulation.start_simulation(
-        client_fn=get_client_fn(partitions),
+        client_fn=get_client_fn(trainloaders,valloaders),
         num_clients=NUM_CLIENTS,
         config=fl.server.ServerConfig(num_rounds=args.num_rounds),
         strategy=strategy,

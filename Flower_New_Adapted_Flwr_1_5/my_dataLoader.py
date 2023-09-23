@@ -7,25 +7,25 @@ import tensorflow as tf
 
 #test loader (dummy)
 
-class SimpleDataGenerator:
-    def __init__(self, batch_size, num_batches):
-        self.batch_size = batch_size
-        self.num_batches = num_batches
+# class SimpleDataGenerator:
+#     def __init__(self, batch_size, num_batches):
+#         self.batch_size = batch_size
+#         self.num_batches = num_batches
 
-    def generate_data(self):
-        for _ in range(self.num_batches):
-            X = np.random.rand(self.batch_size, 128, 128, 128, 1).astype(np.float32)
-            y = np.random.randint(0, 2, (self.batch_size, 128, 128, 128, 4)).astype(np.float32)
-            yield X, y
+#     def generate_data(self):
+#         for _ in range(self.num_batches):
+#             X = np.random.rand(self.batch_size, 128, 128, 128, 1).astype(np.float32)
+#             y = np.random.randint(0, 2, (self.batch_size, 128, 128, 128, 4)).astype(np.float32)
+#             yield X, y
 
-    def get_tf_dataset(self):
-        return tf.data.Dataset.from_generator(
-            self.generate_data,
-            output_signature=(
-                tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 1), dtype=tf.float32),
-                tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 4), dtype=tf.float32),
-            )
-        )
+    # def get_tf_dataset(self):
+    #     return tf.data.Dataset.from_generator(
+    #         self.generate_data,
+    #         output_signature=(
+    #             tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 1), dtype=tf.float32),
+    #             tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 4), dtype=tf.float32),
+    #         )
+    #     )
 
 
 #From 2D unet github dataloader.py
@@ -62,13 +62,22 @@ class DatasetGenerator(Sequence):
         self.ds = self.get_dataset()
     
     def get_tf_dataset(self):
+        # Get a batch to inspect its shape
+        sample_batch = next(self.ds)
+        img_shape = sample_batch[0].shape
+        label_shape = sample_batch[1].shape
+
+        # Update the output signature accordingly
+        output_signature = (
+            tf.TensorSpec(shape=img_shape, dtype=tf.float32),  # img batch
+            tf.TensorSpec(shape=label_shape, dtype=tf.float32)  # label batch
+        )
+
         return tf.data.Dataset.from_generator(
-            self.generate_batch_from_files,  # Your existing generator function
-            output_signature=(
-                tf.TensorSpec(shape=(128, 128, 128, 1), dtype=tf.float32), 
-                tf.TensorSpec(shape=(128, 128, 128, 4), dtype=tf.float32)
-            )
+            self.generate_batch_from_files,
+            output_signature=output_signature
         ).batch(self.batch_size)
+
 
 
     def preprocess_img(self, img):
@@ -411,6 +420,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
         print(t)
         print()'''
 
+    # Contains client partitians, inside of which are images_batches and masks_batchs
     trainloaders = []
     valloaders = []
 
@@ -436,17 +446,33 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                                         batch_size=batch_size,
                                         crop_dim=[crop_dim, crop_dim], 
                                         augment=True, seed=seed)
+        # Retrieve the first batch of images and masks
+        images_batch, masks_batch = ds_train_gen[0]
+
+        # Access the first image and mask from the batch
+        first_image = images_batch[0]
+        first_mask = masks_batch[0]
+
+        # Get the shapes of the first image and mask
+        first_image_shape = first_image.shape
+        first_mask_shape = first_mask.shape
+
+        print("Shape of the first image:", first_image_shape)
+        print("Shape of the first mask:", first_mask_shape)
+
 
         ds_val_gen = DatasetGenerator(file_names_val, 
                                       batch_size=batch_size,crop_dim=[crop_dim, crop_dim], 
                                       augment=False, seed=seed)
 
-        # Convert to tf.data.Dataset
-        tf_train_dataset = ds_train_gen.get_tf_dataset()
-        tf_val_dataset = ds_val_gen.get_tf_dataset()
-
+        # Convert to tf.data.Dataset (wrapper for serialization)
+        #warning("")
+        tf_train_dataset = ds_train_gen#.get_tf_dataset()
+        tf_val_dataset = ds_val_gen#.get_tf_dataset()
+        #NOTE : I have removed get_tf_dataset() in order to test if the model loads without the serialized added code
         trainloaders.append(tf_train_dataset)
         valloaders.append(tf_val_dataset)
+        
 
     # Convert test files to actual data
     print("now for test dataloader")
@@ -458,7 +484,9 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-    tf_test_dataset = testloader.get_tf_dataset()
+    tf_test_dataset = testloader#.get_tf_dataset()
+    #NOTE : I have removed get_tf_dataset() in order to test if the model loads without the serialized added code
+        
     return trainloaders, valloaders, tf_test_dataset
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September

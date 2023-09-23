@@ -2,7 +2,7 @@ from tensorflow.keras.utils import Sequence
 import numpy as np
 import os
 import json
-import settings
+
     
 def get_decathlon_filelist(data_path, seed=816, split=0.85):
     """
