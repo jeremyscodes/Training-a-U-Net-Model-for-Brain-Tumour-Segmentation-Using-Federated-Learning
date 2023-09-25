@@ -312,44 +312,6 @@ class unet(object):
 
         return model
 
-    def get_callbacks(self):
-        """
-        Define any callbacks for the training
-        """
-
-        model_filename = os.path.join(
-            self.output_path, self.inference_filename)
-
-        print("Writing model to '{}'".format(model_filename))
-
-        # Save model whenever we get better validation loss
-        model_checkpoint = K.callbacks.ModelCheckpoint(model_filename,
-                                                       verbose=1,
-                                                       monitor="val_loss",
-                                                       save_best_only=True)
-
-        directoryName = "unet_block{}_inter{}_intra{}".format(self.blocktime,
-                                                              self.num_threads,
-                                                              self.num_inter_threads)
-
-        # Tensorboard callbacks
-        if (self.use_upsampling):
-            tensorboard_filename = os.path.join(self.output_path,
-                                                "keras_tensorboard_upsampling/{}".format(
-                                                    directoryName))
-        else:
-            tensorboard_filename = os.path.join(self.output_path,
-                                                "keras_tensorboard_transposed/{}".format(
-                                                    directoryName))
-
-        tensorboard_checkpoint = K.callbacks.TensorBoard(
-            log_dir=tensorboard_filename,
-            write_graph=True, write_images=True)
-
-        early_stopping = K.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
-
-        return model_filename, [model_checkpoint, early_stopping, tensorboard_checkpoint]
-
     def evaluate_model(self, model_filename, ds_test):
         """
         Evaluate the best model on the validation dataset

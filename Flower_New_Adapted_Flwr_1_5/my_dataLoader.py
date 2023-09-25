@@ -5,29 +5,6 @@ from  keras.utils import Sequence
 import tensorflow as tf
 #from tqdm import tqdm, trange
 
-#test loader (dummy)
-
-# class SimpleDataGenerator:
-#     def __init__(self, batch_size, num_batches):
-#         self.batch_size = batch_size
-#         self.num_batches = num_batches
-
-#     def generate_data(self):
-#         for _ in range(self.num_batches):
-#             X = np.random.rand(self.batch_size, 128, 128, 128, 1).astype(np.float32)
-#             y = np.random.randint(0, 2, (self.batch_size, 128, 128, 128, 4)).astype(np.float32)
-#             yield X, y
-
-    # def get_tf_dataset(self):
-    #     return tf.data.Dataset.from_generator(
-    #         self.generate_data,
-    #         output_signature=(
-    #             tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 1), dtype=tf.float32),
-    #             tf.TensorSpec(shape=(self.batch_size, 128, 128, 128, 4), dtype=tf.float32),
-    #         )
-    #     )
-
-
 #From 2D unet github dataloader.py
 class DatasetGenerator(Sequence):
     """
@@ -311,37 +288,6 @@ class DatasetGenerator(Sequence):
         plt.imshow(label[slice_num,:,:,0]);
         plt.title("Tumor, Slice #{}".format(slice_num));
 
-'''
-def load_data(file_names):
-    
-    # Initialize lists to store data
-    images = []
-    masks = []
-
-    # Loop over all .mat files
-    for fname in file_names:
-        # Load the mat file
-        mat_data = loadmat('../../Figshare/brainTumorDataPublic_convert_All/'+ fname)#
-        image = mat_data['image']
-        mask = mat_data['mask']
-        # Append data to lists
-        images.append(image)
-        masks.append(mask)
-    print("Finished Loading a scans/masks batch")
-    return images, masks'''
-
-'''def get_split_by_id(data):
-    'unnecessary since all scans are in a single .nii.gz file for a single brain'
-    # Create a GroupShuffleSplit instance
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42) #note 10% testing
-
-    # Get the train and test indices
-    train_indices, test_indices = next(gss.split(data, groups=data['PatientID']))
-
-    # Split the train_val data into training and validation sets
-    #train_indices, val_indices = next(gss.split(data.iloc[train_val_indices], groups=data.iloc[train_val_indices]['PatientID']))
-    # Return the indicies for the data split. Each list contains the indices (rows) for the files in train,val,test
-    return train_indices, test_indices'''
 
 def split_into_train_val(data, split_percentage: float):
     """
@@ -423,7 +369,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     # Contains client partitians, inside of which are images_batches and masks_batchs
     trainloaders = []
     valloaders = []
-
+    first=True
     for client_set in client_sets:
         # Split into training and validation
         train_val_partitions = split_into_train_val(client_set, val_ratio)  
@@ -464,9 +410,10 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
         ds_val_gen = DatasetGenerator(file_names_val, 
                                       batch_size=batch_size,crop_dim=[crop_dim, crop_dim], 
                                       augment=False, seed=seed)
-
+        if first:
+            input_shape, output_shape = ds_train_gen.get_input_shape(), ds_val_gen.get_output_shape()
+            first=False
         # Convert to tf.data.Dataset (wrapper for serialization)
-        #warning("")
         tf_train_dataset = ds_train_gen.get_tf_dataset()
         tf_val_dataset = ds_val_gen.get_tf_dataset()
         # NOTE : I have added get_tf_Dataset() since the model (manually trained) was able to train. And now in flower it needs to be serializable
@@ -489,7 +436,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     # NOTE : I have added get_tf_Dataset() since the model (manually trained) was able to train. And now in flower it needs to be serializable
     #NOTE : I have removed get_tf_dataset() in order to test if the model loads without the serialized added code
         
-    return trainloaders, valloaders, tf_test_dataset
+    return trainloaders, valloaders, tf_test_dataset, input_shape, output_shape
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September
 def count_images_in_loader(loader, batch_size):
@@ -498,16 +445,16 @@ def count_images_in_loader(loader, batch_size):
         # Using the shape of the batch data to count images
         total_images += batch[0].shape[0]
     return total_images
-# def main():
-#     trainloaders, valloaders, testloader = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
+def main():
+    trainloaders, valloaders, testloader = load_datasets(num_partitions=8,batch_size=20,  val_ratio=0.1)
 
-#     # Counting images in trainloaders and valloaders for each client
-#     # for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
-#     #     print(f"Client {idx + 1}:")
-#     #     print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
-#     #     print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
-#     #     print("----------------------")
+    # Counting images in trainloaders and valloaders for each client
+    for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
+        print(f"Client {idx + 1}:")
+        print(f"Number of images in trainloader: {count_images_in_loader(trainloader, 20)}")
+        print(f"Number of images in valloader: {count_images_in_loader(valloader, 20)}")
+        print("----------------------")
 
-#     # Counting images in testloader
-#     print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
-# if __name__ == "__main__": main()
+    # Counting images in testloader
+    print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
+if __name__ == "__main__": main()
