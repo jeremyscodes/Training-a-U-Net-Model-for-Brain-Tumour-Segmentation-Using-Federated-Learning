@@ -192,7 +192,6 @@ def split_into_n_partitions(data, n):
 
 
 def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
-    print("Start of load_dataset method")
     crop_dim=128  # Original resolution (240)
     seed=816
     train_test_split_val=0.85
@@ -206,9 +205,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     train_dataset = train_data.iloc[train_indices]
     test_dataset = train_data.iloc[test_indices]
 
-    print("Part A: About to call first split_by_patient_groups")
     client_sets = split_into_n_partitions(train_dataset,num_partitions)
-    print("finished splitting into client datasets") 
          #trainsets[0] gives file names for training data for client 0
     '''for t in trainsets:
         print(t)
@@ -254,7 +251,6 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
         
 
     # Convert test files to actual data
-    print("now for test dataloader")
     file_names_test = test_dataset['path'].tolist()
     file_names_test = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_test]
 

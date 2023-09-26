@@ -12,7 +12,6 @@ from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 import sys
 from my_new_dataloader import load_datasets #using new loader (serializable)
 
-print("IMPORTS WORKED")
 
 
 from hydra.core.config_store import ConfigStore
@@ -140,6 +139,9 @@ class unet(object):
         Also, the log allows avoidance of the division which
         can help prevent underflow when the numbers are very small.
         """
+        print("In dice_coef_loss")
+        print("Shape of y_true:", tf.shape(target))
+        print("Shape of y_pred:", tf.shape(prediction))
         intersection = tf.reduce_sum(prediction * target, axis=axis)
         p = tf.reduce_sum(prediction, axis=axis)
         t = tf.reduce_sum(target, axis=axis)
@@ -153,6 +155,8 @@ class unet(object):
         """
         Combined Dice and Binary Cross Entropy Loss
         """
+        
+
         return self.weight_dice_loss*self.dice_coef_loss(target, prediction, axis, smooth) + \
             (1-self.weight_dice_loss)*K.losses.binary_crossentropy(target, prediction)
 
@@ -309,6 +313,7 @@ class unet(object):
         return model
 
     def evaluate_model(self, model_filename, ds_test):
+        # NOTE Should not be used
         """
         Evaluate the best model on the validation dataset
         """
@@ -513,7 +518,6 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
 
 def main(cfg: DictConfig) -> None:
     
-    print("Hello?")
     # enable_tf_gpu_growth()
     # Parse input arguments
     args = parser.parse_args()
@@ -544,7 +548,7 @@ def main(cfg: DictConfig) -> None:
     
     
     # I checked that these values are the same as the original train.py
-    print(input_shape,output_shape)
+    # print(input_shape,output_shape)
     '''
     #Example of how to load, and train
     u_net = unet()
