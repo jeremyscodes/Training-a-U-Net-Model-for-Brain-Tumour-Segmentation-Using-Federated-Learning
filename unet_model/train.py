@@ -119,6 +119,9 @@ if __name__ == "__main__":
 
     model = unet_model.create_model(
         ds_train.get_input_shape(), ds_train.get_output_shape())
+    print("ds_train.get_input_shape(), ds_train.get_output_shape()")
+    print(
+        ds_train.get_input_shape(), ds_train.get_output_shape())
 
     print("Get callbacks")
     model_filename, model_callbacks = unet_model.get_callbacks() 

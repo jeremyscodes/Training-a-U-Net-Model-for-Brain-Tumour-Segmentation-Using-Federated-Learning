@@ -1,34 +1,15 @@
-#
-# -*- coding: utf-8 -*-
-#
-# Copyright (c) 2019 Intel Corporation
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-# SPDX-License-Identifier: EPL-2.0
-#
+print("Running")
 
-"""
-This module contains all of the model definition code.
-You can try custom models by modifying the code here.
-"""
-
-import settings
 import os
-import time
-import shutil
+os.environ["SM_FRAMEWORK"] = "tf.keras"
 
-import tensorflow as tf  # conda install -c anaconda tensorflow
+import tensorflow as tf
+import psutil
+from my_new_dataloader import load_datasets #using new loader (serializable)
+
+# from argparser import args
+import argparse
+parser = argparse.ArgumentParser(description="Flower Simulation with Tensorflow/Keras")
 
 from tensorflow import keras as K
 
@@ -37,19 +18,30 @@ class unet(object):
     2D U-Net model class
     """
 
-    def __init__(self, channels_first=settings.CHANNELS_FIRST,
-                 fms=settings.FEATURE_MAPS,
-                 output_path=settings.OUT_PATH,
-                 inference_filename=settings.INFERENCE_FILENAME,
-                 blocktime=settings.BLOCKTIME,
-                 num_threads=settings.NUM_INTRA_THREADS,
-                 learning_rate=settings.LEARNING_RATE,
-                 weight_dice_loss=settings.WEIGHT_DICE_LOSS,
-                 num_inter_threads=settings.NUM_INTRA_THREADS,
-                 use_upsampling=settings.USE_UPSAMPLING,
-                 use_dropout=settings.USE_DROPOUT,
-                 print_model=settings.PRINT_MODEL):
-
+    def __init__(self, channels_first=False,
+                 fms=16,#Change to 32 for 80% DC
+                 output_path=os.path.join("./output/"),
+                 inference_filename="2d_unet_decathlon",
+                 blocktime=0,
+                 num_threads=min(len(psutil.Process().cpu_affinity()), psutil.cpu_count(logical=False)),
+                 learning_rate=0.0001,
+                 weight_dice_loss=0.85,
+                 num_inter_threads=1,
+                 use_upsampling=False,
+                 use_dropout=True,
+                 print_model=False):
+    # def __init__(self, channels_first=settings.CHANNELS_FIRST,
+    #              fms=settings.FEATURE_MAPS,
+    #              output_path=settings.OUT_PATH,
+    #              inference_filename=settings.INFERENCE_FILENAME,
+    #              blocktime=settings.BLOCKTIME,
+    #              num_threads=settings.NUM_INTRA_THREADS,
+    #              learning_rate=settings.LEARNING_RATE,
+    #              weight_dice_loss=settings.WEIGHT_DICE_LOSS,
+    #              num_inter_threads=settings.NUM_INTRA_THREADS,
+    #              use_upsampling=settings.USE_UPSAMPLING,
+    #              use_dropout=settings.USE_DROPOUT,
+    #              print_model=settings.PRINT_MODEL):
         self.channels_first = channels_first
         if self.channels_first:
             """
@@ -135,9 +127,9 @@ class unet(object):
         Also, the log allows avoidance of the division which
         can help prevent underflow when the numbers are very small.
         """
-        print("in dice_coef_loss")
-        print("Target shape: ",tf.shape(target))
-        print("prediction shape: ",tf.shape(prediction))
+        print("In dice_coef_loss")
+        print("Shape of y_true:", tf.shape(target))
+        print("Shape of y_pred:", tf.shape(prediction))
         intersection = tf.reduce_sum(prediction * target, axis=axis)
         p = tf.reduce_sum(prediction, axis=axis)
         t = tf.reduce_sum(target, axis=axis)
@@ -151,6 +143,8 @@ class unet(object):
         """
         Combined Dice and Binary Cross Entropy Loss
         """
+        
+
         return self.weight_dice_loss*self.dice_coef_loss(target, prediction, axis, smooth) + \
             (1-self.weight_dice_loss)*K.losses.binary_crossentropy(target, prediction)
 
@@ -174,9 +168,6 @@ class unet(object):
 
         num_chan_in = imgs_shape[self.concat_axis]
         num_chan_out = msks_shape[self.concat_axis]
-        print("num_chan_in = ",num_chan_in)
-        print("num_chan_out = ",num_chan_out)
-        
 
         # You can make the network work on variable input height and width
         # if you pass None as the height and width
@@ -309,45 +300,8 @@ class unet(object):
 
         return model
 
-    def get_callbacks(self):
-        """
-        Define any callbacks for the training
-        """
-
-        model_filename = os.path.join(
-            self.output_path, self.inference_filename)
-
-        print("Writing model to '{}'".format(model_filename))
-
-        # Save model whenever we get better validation loss
-        model_checkpoint = K.callbacks.ModelCheckpoint(model_filename,
-                                                       verbose=1,
-                                                       monitor="val_loss",
-                                                       save_best_only=True)
-
-        directoryName = "unet_block{}_inter{}_intra{}".format(self.blocktime,
-                                                              self.num_threads,
-                                                              self.num_inter_threads)
-
-        # Tensorboard callbacks
-        if (self.use_upsampling):
-            tensorboard_filename = os.path.join(self.output_path,
-                                                "keras_tensorboard_upsampling/{}".format(
-                                                    directoryName))
-        else:
-            tensorboard_filename = os.path.join(self.output_path,
-                                                "keras_tensorboard_transposed/{}".format(
-                                                    directoryName))
-
-        tensorboard_checkpoint = K.callbacks.TensorBoard(
-            log_dir=tensorboard_filename,
-            write_graph=True, write_images=True)
-
-        early_stopping = K.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
-
-        return model_filename, [model_checkpoint, early_stopping, tensorboard_checkpoint]
-
     def evaluate_model(self, model_filename, ds_test):
+        # NOTE Should not be used
         """
         Evaluate the best model on the validation dataset
         """
@@ -408,3 +362,128 @@ class unet(object):
         print("       --model_name {} \\".format(self.inference_filename))
         print("       --output_dir {} \\".format(os.path.join(self.output_path, "FP32")))
         print("       --data_type FP32\n\n")
+
+parser.add_argument(
+    "--num_cpus",
+    type=int,
+    default=1,
+    help="Number of CPUs to assign to a virtual client",
+)
+parser.add_argument(
+    "--num_gpus",
+    type=float,
+    default=0.0,
+    help="Ratio of GPU memory to assign to a virtual client",
+)
+
+
+
+def main():
+    print("Running")
+    # enable_tf_gpu_growth()
+    # Parse input arguments
+    args = parser.parse_args()
+    
+    # Create dataset partitions (needed if your dataset is not pre-partitioned)
+    
+    # 1. Load Data
+    trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(2, 20)
+    print("Data Loaded")
+    num_clients=len(trainloaders)
+    train_sample_dict={
+        2:[30464,30336],
+        4:[15232,15232,15232,15104],
+        8:[7680,7680,7680,7552,7552,7552,7552,7552]
+    }
+    val_sample_dict={
+        2:[3200,3200],
+        4:[1536,1536,1536,1536],
+        8:[768,768,768,768,768,768,768,768]
+    }
+    # get num training samples for each client from train_sample_dict
+    # num_train_samples_clients = train_sample_dict[cfg.num_clients]
+    # get num vallidation sample for each client from val_sample_dict
+    # num_val_samples_clients = val_sample_dict[cfg.num_clients]
+    
+    
+    
+    # I checked that these values are the same as the original train.py
+    # print(input_shape,output_shape)
+    
+    #Example of how to load, and train
+    client1_train = trainloaders[0]
+    
+    u_net = unet()
+    model= u_net.create_model(client1_train.get_input_shape(),client1_train.get_output_shape() , final=False) 
+    print("client1_train.get_input_shape()= ",client1_train.get_input_shape())
+    print("client1_train.get_output_shape() = ",client1_train.get_output_shape())
+    # [x] get weights into params var
+    param = model.get_weights()
+    # [x] set param
+    model.set_weights(param)
+    # [x] fit model
+    print("Fitting, 1 epoch")
+    model.fit(client1_train, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
+    print("Evaluate Model")
+    loss, dc, soft_DC = model.evaluate(testloader,verbose=2)
+    print(loss,dc,soft_DC)
+    print("All good!")
+    
+    '''
+
+    # Create FedAvg strategy
+    strategy = fl.server.strategy.FedAvg(
+        fraction_fit=1,  # Sample 10% of available clients for training
+        fraction_evaluate=1,  # Sample 5% of available clients for evaluation
+        min_fit_clients=cfg.num_clients_per_round_fit ,  # Never sample less than 10 clients for training
+        min_evaluate_clients=cfg.num_clients_per_round_eval ,  # Never sample less than 5 clients for evaluation
+        min_available_clients=int(
+            cfg.num_clients * 1
+        ),  # Wait until at least n clients are available
+        evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
+        evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function
+        # evaluate_fn=get_evaluate_fn(input_shape, output_shape),  # global evaluation function
+
+    )
+    
+    # With a dictionary, you tell Flower's VirtualClientEngine that each
+    # client needs exclusive access to these many resources in order to run
+    client_resources = {
+        "num_cpus": args.num_cpus,
+        "num_gpus": args.num_gpus,
+    }
+    
+    # Start simulation
+    history = fl.simulation.start_simulation(
+        client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
+        # client_fn=get_client_fn(num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
+
+        num_clients=cfg.num_clients,
+        config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
+        strategy=strategy,
+        client_resources=client_resources,
+        actor_kwargs={
+            "on_actor_init_fn": enable_tf_gpu_growth  # Enable GPU growth upon actor init
+            # does nothing if `num_gpus` in client_resources is 0.0
+        }
+    ) 
+    '''
+    print("Got to end of uncommented code")
+    
+    '''
+    import matplotlib.pyplot as plt
+
+    print(f"{history.metrics_centralized = }")
+
+    global_accuracy_centralised = history.metrics_centralized["dice_coef"]
+    round = [data[0] for data in global_accuracy_centralised]
+    acc = [100.0 * data[1] for data in global_accuracy_centralised]
+    plt.plot(round, acc)
+    plt.grid()
+    plt.ylabel("Accuracy (%)")
+    plt.xlabel("Round")
+    plt.title("BRATS - IID - 2 clients with 10 clients per round")
+    
+    '''
+
+if __name__ == "__main__": main()

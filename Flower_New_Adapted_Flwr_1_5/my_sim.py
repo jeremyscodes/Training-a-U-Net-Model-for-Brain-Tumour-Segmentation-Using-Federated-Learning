@@ -83,7 +83,7 @@ class unet(object):
         self.metrics = [self.dice_coef, self.soft_dice_coef]
 
         self.loss = self.dice_coef_loss
-        #self.loss = self.combined_dice_ce_loss
+        # self.loss = self.combined_dice_ce_loss
 
         self.optimizer = K.optimizers.Adam(learning_rate=self.learningrate)
 
@@ -142,6 +142,13 @@ class unet(object):
         print("In dice_coef_loss")
         print("Shape of y_true:", tf.shape(target))
         print("Shape of y_pred:", tf.shape(prediction))
+        target = tf.reshape(target, shape=(-1,))
+        prediction = tf.reshape(prediction, shape=(-1,))
+        # BUG the above reshape causes: ValueError: Invalid reduction dimension 1 for input with 1 dimensions. for '{{node dice_coef_loss/Sum}} = Sum[T=DT_FLOAT, Tidx=DT_INT32, keep_dims=false](dice_coef_loss/mul, dice_coef_loss/Sum/reduction_indices)' with input shapes: [?], [2] and with computed input tensors: input[1] = <1 2>.
+
+
+        print(" Shape of y_true:", tf.shape(target))
+        print(" Shape of y_pred:", tf.shape(prediction))
         intersection = tf.reduce_sum(prediction * target, axis=axis)
         p = tf.reduce_sum(prediction, axis=axis)
         t = tf.reduce_sum(target, axis=axis)
@@ -180,6 +187,11 @@ class unet(object):
 
         num_chan_in = imgs_shape[self.concat_axis]
         num_chan_out = msks_shape[self.concat_axis]
+        print("In Unet class: def unet-model method:")
+        print("imgs_shape = ", imgs_shape)
+        print("msks_Shape = ",imgs_shape)
+        print("num_cha_in = ",num_chan_in)
+        print("num_cha_out = ",num_chan_out)
 
         # You can make the network work on variable input height and width
         # if you pass None as the height and width
@@ -526,6 +538,7 @@ def main(cfg: DictConfig) -> None:
     
     # 1. Load Data
     trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
+    # Check that the batches
     print("Data Loaded")
     num_clients=len(trainloaders)
     if cfg.num_clients != num_clients:
@@ -545,23 +558,30 @@ def main(cfg: DictConfig) -> None:
     # get num vallidation sample for each client from val_sample_dict
     num_val_samples_clients = val_sample_dict[cfg.num_clients]
     
-    
+    #
     
     # I checked that these values are the same as the original train.py
     # print(input_shape,output_shape)
-    '''
+    
     #Example of how to load, and train
+    client1_train = trainloaders[0]
+    
     u_net = unet()
-    model= u_net.create_model(client1.get_input_shape(),client1.get_output_shape() , final=False) 
+    model= u_net.create_model(client1_train.get_input_shape(),client1_train.get_output_shape() , final=False) 
+    print("client1_train.get_input_shape()= ",client1_train.get_input_shape())
+    print("client1_train.get_output_shape() = ",client1_train.get_output_shape())
     # [x] get weights into params var
     param = model.get_weights()
     # [x] set param
     model.set_weights(param)
     # [x] fit model
-    # model_filename, model_callbacks = u_net.get_callbacks() 
-    train_dataset = trainloaders[0]#.get_tf_dataset() # Wrapped dataset for serialization
-    print("Fitting")
-    model.fit(train_dataset, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
+    print("Fitting, 1 epoch")
+    model.fit(client1_train, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
+    print("Evaluate Model")
+    loss, dc, soft_DC = model.evaluate(testloader,verbose=2)
+    print(loss,dc,soft_DC)
+    print("All good!")
+
     '''
 
     # Create FedAvg strategy
@@ -600,7 +620,7 @@ def main(cfg: DictConfig) -> None:
             # does nothing if `num_gpus` in client_resources is 0.0
         }
     ) 
-    
+    '''
     print("Got to end of uncommented code")
     
     '''

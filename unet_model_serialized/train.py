@@ -120,7 +120,7 @@ if __name__ == "__main__":
     model = unet_model.create_model(
         ds_train.get_input_shape(), ds_train.get_output_shape())
     print(ds_train.get_input_shape(), ds_train.get_output_shape())
-    '''
+    
     print("Get callbacks")
     model_filename, model_callbacks = unet_model.get_callbacks() 
     
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     print("-" * 30)
     unet_model.print_openvino_mo_command(
         model_filename, ds_test.get_input_shape())
-    '''
+    
     print(
         "Total time elapsed for program = {} seconds".format(
             datetime.datetime.now() -

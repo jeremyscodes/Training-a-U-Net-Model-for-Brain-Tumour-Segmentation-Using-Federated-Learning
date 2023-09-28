@@ -16,6 +16,7 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         self.slice_dim = 2
         img = np.array(nib.load(filenames[0]).dataobj)  
         self.num_slices_per_scan = img.shape[self.slice_dim]
+        self.num_files = len(self.filenames)
         
     def __len__(self):
         return int(np.ceil(len(self.filenames) / self.batch_size))
@@ -26,10 +27,28 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         batch_filenames = self.filenames[start:end]
         
         batch_data, batch_labels = self.load_data(batch_filenames)
-        
+        print("batch_data shape: ", batch_data.shape)
+        print("batch_labels shape: ", batch_labels.shape)
+
         if self.augment:
             batch_data, batch_labels = self.augment_data(batch_data, batch_labels)
+        # Ensure the batch_data and batch_labels have a 4th dimension.
+        if len(np.shape(batch_data)) == 3:
+            batch_data = np.expand_dims(batch_data, axis=-1)
+        if len(np.shape(batch_labels)) == 3:
+            batch_labels = np.expand_dims(batch_labels, axis=-1)
+        print("img_batch shape: ",batch_data.shape)
+        print("label_batch shape: ",batch_labels.shape)
         
+        # # NOTE : added this code to match the transposition in line 264 in original dataloader.py
+        # # Check the dimensions before transposing.
+        if len(batch_data.shape) == 4 and len(batch_labels.shape) == 4:
+            # Transpose the batch data and labels to match the dimensionality of DatasetGenerator.
+            batch_data = np.transpose(batch_data, [2, 0, 1, 3]).astype(np.float32)
+            batch_labels = np.transpose(batch_labels, [2, 0, 1, 3]).astype(np.float32)
+        else:
+            raise ValueError(f"Expected batch_data and batch_labels to have 4 dimensions, but got {len(batch_data.shape)} and {len(batch_labels.shape)} dimensions respectively.")
+    
         return batch_data, batch_labels
             
     def on_epoch_end(self):
@@ -110,17 +129,25 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         batch_data = []
         batch_labels = []
         for filename in batch_filenames:
-            img_filename = filename.replace("labelsTr", "imagesTr")
             
-            img = np.array(nib.load(img_filename).dataobj)
+            
+            
+            img = np.array(nib.load(filename).dataobj)
             img = img[:,:,:,0]  # Just take FLAIR channel (channel 0)
             img = self.preprocess_img(img)
-            
-            label = np.array(nib.load(filename).dataobj)
+            print("Img shape: ",img.shape)
+            label_filename = filename.replace("imagesTr", "labelsTr")
+            print("filename: ",label_filename)
+            label = np.array(nib.load(label_filename).dataobj)
+            # print("BEFORE: label shape: ",label.shape)
             label = self.preprocess_label(label)
+            print("AFTER: label shape: ",label.shape)
+
+            img, label = self.crop_input(img, label)
             
             batch_data.append(img)
             batch_labels.append(label)
+            
         
         return np.array(batch_data), np.array(batch_labels)
         'returns NumPy arrays so no conversion needed!'

@@ -204,8 +204,10 @@ class DatasetGenerator(Sequence):
                 img = img[:,:,:,0]  # Just take FLAIR channel (channel 0)
                 img = self.preprocess_img(img)
 
+                print("label_filename: ",label_filename)
                 label = np.array(nib.load(label_filename).dataobj)
                 label = self.preprocess_label(label)
+                print("label shape: ",label.shape)
                 
                 # Crop input and label
                 img, label = self.crop_input(img, label)
@@ -255,12 +257,23 @@ class DatasetGenerator(Sequence):
 
             if self.augment:
                 img_batch, label_batch = self.augment_data(img_batch, label_batch)
-                
+            print("before expand")
+            print("img_batch shape:       ",img_batch.shape)
+            print("label_batch shape:     ",label_batch.shape)
+
             if len(np.shape(img_batch)) == 3:
                 img_batch = np.expand_dims(img_batch, axis=-1)
             if len(np.shape(label_batch)) == 3:
                 label_batch = np.expand_dims(label_batch, axis=-1)
-                
+            print("after expand")
+            print("img_batch shape:        ",img_batch.shape)
+            print("label_batch shape:      ",label_batch.shape)
+
+            ret1 = np.transpose(img_batch, [2,0,1,3]).astype(np.float32)
+            ret2 = np.transpose(label_batch, [2,0,1,3]).astype(np.float32)
+            print("Transposed img_batch:   ",ret1.shape)
+            print("Transposed label_batch: ",ret2.shape)
+
             yield np.transpose(img_batch, [2,0,1,3]).astype(np.float32), np.transpose(label_batch, [2,0,1,3]).astype(np.float32)
 
 
