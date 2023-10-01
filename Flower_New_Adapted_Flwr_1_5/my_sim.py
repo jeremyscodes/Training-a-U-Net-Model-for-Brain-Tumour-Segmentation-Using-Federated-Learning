@@ -10,7 +10,7 @@ from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 
 import sys
-from my_new_dataloader import load_datasets #using new loader (serializable)
+from ang_loader import load_datasets #using new loader (serializable)
 
 
 
@@ -65,6 +65,10 @@ class unet(object):
         else:
             """
             Use NHWC format for data
+                N: Number of images in the batch
+                H: Height of the image
+                W: Width of the image
+                C: Number of channels
             """
             self.concat_axis = -1
             self.data_format = "channels_last"
@@ -142,10 +146,6 @@ class unet(object):
         print("In dice_coef_loss")
         print("Shape of y_true:", tf.shape(target))
         print("Shape of y_pred:", tf.shape(prediction))
-        target = tf.reshape(target, shape=(-1,))
-        prediction = tf.reshape(prediction, shape=(-1,))
-        # BUG the above reshape causes: ValueError: Invalid reduction dimension 1 for input with 1 dimensions. for '{{node dice_coef_loss/Sum}} = Sum[T=DT_FLOAT, Tidx=DT_INT32, keep_dims=false](dice_coef_loss/mul, dice_coef_loss/Sum/reduction_indices)' with input shapes: [?], [2] and with computed input tensors: input[1] = <1 2>.
-
 
         print(" Shape of y_true:", tf.shape(target))
         print(" Shape of y_pred:", tf.shape(prediction))
@@ -428,8 +428,6 @@ class FlowerClient(fl.client.NumPyClient):
 
     def fit(self, parameters, config):
         print("fit()_______________")
-        print(parameters.shape)
-        print(type(parameters))
         #parameters is a list of numpy arrays representing the weights of the global model
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
@@ -444,8 +442,6 @@ class FlowerClient(fl.client.NumPyClient):
     def evaluate(self, parameters, config):
         print("evaluate_______________")
         # get global model to be evaluated on client's validation data
-        print(parameters.shape)
-        print(type(parameters))
         self.model.set_weights(parameters)
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
         loss, dice_coef, soft_dice_coef = self.model.evaluate(self.valloader, verbose=2)
@@ -564,25 +560,25 @@ def main(cfg: DictConfig) -> None:
     # print(input_shape,output_shape)
     
     #Example of how to load, and train
-    client1_train = trainloaders[0]
+    # client1_train = trainloaders[0]
     
-    u_net = unet()
-    model= u_net.create_model(client1_train.get_input_shape(),client1_train.get_output_shape() , final=False) 
-    print("client1_train.get_input_shape()= ",client1_train.get_input_shape())
-    print("client1_train.get_output_shape() = ",client1_train.get_output_shape())
-    # [x] get weights into params var
-    param = model.get_weights()
-    # [x] set param
-    model.set_weights(param)
-    # [x] fit model
-    print("Fitting, 1 epoch")
-    model.fit(client1_train, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
-    print("Evaluate Model")
-    loss, dc, soft_DC = model.evaluate(testloader,verbose=2)
-    print(loss,dc,soft_DC)
-    print("All good!")
+    # u_net = unet()
+    # model= u_net.create_model(client1_train.get_input_shape(),client1_train.get_output_shape() , final=False) 
+    # print("client1_train.get_input_shape()= ",client1_train.get_input_shape())
+    # print("client1_train.get_output_shape() = ",client1_train.get_output_shape())
+    # # [x] get weights into params var
+    # param = model.get_weights()
+    # # [x] set param
+    # model.set_weights(param)
+    # # [x] fit model
+    # print("Fitting, 1 epoch")
+    # model.fit(client1_train, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
+    # print("Evaluate Model")
+    # loss, dc, soft_DC = model.evaluate(testloader,verbose=2)
+    # print(loss,dc,soft_DC)
+    # print("All good!")
 
-    '''
+    
 
     # Create FedAvg strategy
     strategy = fl.server.strategy.FedAvg(
@@ -620,7 +616,7 @@ def main(cfg: DictConfig) -> None:
             # does nothing if `num_gpus` in client_resources is 0.0
         }
     ) 
-    '''
+    
     print("Got to end of uncommented code")
     
     '''
