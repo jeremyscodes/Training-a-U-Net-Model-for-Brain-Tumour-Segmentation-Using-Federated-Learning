@@ -504,6 +504,30 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
         "dice_coef": sum(dice_coef) / sum(examples),
         "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
     }
+#testing functions
+def masks_which_contain_ones():
+        found_ones = False
+        for i in range(len(trainloaders[0])):
+            if tf.reduce_sum(trainloaders[0][i][1]) > 0:
+                print("Mask number ",i," for client1 contains ones")
+                found_ones = True
+        if not found_ones:
+            print("No masks with white pixels found in trainloaders[0]")
+# The above test returned the correct result, there are are masks with white pixels in trainloaders[0]
+def count_samples_in_batches(trainloaders):
+    partitions_count = []
+    for i, loader in enumerate(trainloaders):
+        count = 0
+        # Iterate over each batch in the loader
+        for batch_data, batch_labels in loader:
+            # Assuming batch_data is in the shape (batch_size, height, width, channels)
+            # and each slice in the batch is a sample
+            count += batch_data.shape[0]  # Add the number of slices in the current batch to the count
+            print("num slices in batch = ",batch_data.shape[0])
+        partitions_count.append(count)
+        print(f'Partition {i + 1} has {count} slices.')
+    return partitions_count
+
 
 def main(cfg: DictConfig) -> None:
     
@@ -516,20 +540,50 @@ def main(cfg: DictConfig) -> None:
     # 1. Load Data
     print("Loading and Partitioning Data")
     trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
+    # write a function that checks which masks in trainloaders[0] have white pixels
+    
+    # def print_trainloader_sizes():
+    #     for i, trainloader in enumerate(trainloaders):
+    #         num_samples = 0
+    #         for batch in trainloader:
+    #             num_samples += batch[0].shape[0]
+    #         print(f"Trainloader {i} has {num_samples} samples")
+    # print_trainloader_sizes()
+    
+    # Call the function with your trainloaders
+
+    print("Trainloaders")
+    absolute_counts_train = count_samples_in_batches(trainloaders)  
+    print("Valloaders")
+    absolute_counts_val = count_samples_in_batches(valloaders)     
+    ls =[]
+    ls.append(testloader)
+    print("Testloader")
+    absolute_counts_test = count_samples_in_batches(ls)  
+    # print the sum of all samples using the absolute_counts_trian absolute_counts_val and absolute_counts_test
+    
+    print("Sum of all samples in trainloaders = ",sum(absolute_counts_train))
+    print("Sum of all samples in valloaders = ",sum(absolute_counts_val))
+    print("Sum of all samples in testloader = ",sum(absolute_counts_test))
+    # print sum of sums
+    print("Sum of all samples = ",sum(absolute_counts_train)+sum(absolute_counts_val)+sum(absolute_counts_test))
+    print("Finished")
+    
+    # masks_which_contain_ones()
     # Check that the batches
     print("Data Loaded")
     num_clients=len(trainloaders)
     if cfg.num_clients != num_clients:
         print("Error: dataloader did not return the correct number of training sets: ",num_clients,"!=",cfg.num_clients)
     train_sample_dict={
-        2:[30464,30336],
-        4:[15232,15232,15232,15104],
-        8:[7680,7680,7680,7552,7552,7552,7552,7552]
+        2:[33790,33790],
+        4:[16895,16895,16895,16895],
+        8:[8525,8525,8525,8525,8370,8370,8370,8370]
     }
     val_sample_dict={
-        2:[3200,3200],
-        4:[1536,1536,1536,1536],
-        8:[768,768,768,768,768,768,768,768]
+        2:[3720,3780],
+        4:[1860,1860,1860,1860],
+        8:[930,930,930,930,930,930,930,930]
     }
     # get num training samples for each client from train_sample_dict
     num_train_samples_clients = train_sample_dict[cfg.num_clients]
@@ -602,7 +656,7 @@ def main(cfg: DictConfig) -> None:
     
     print("Got to end of uncommented code")
     
-    '''
+    
     import matplotlib.pyplot as plt
 
     print(f"{history.metrics_centralized = }")
@@ -615,8 +669,10 @@ def main(cfg: DictConfig) -> None:
     plt.ylabel("Accuracy (%)")
     plt.xlabel("Round")
     plt.title("BRATS - IID - 2 clients with 10 clients per round")
+    # save the plot
+    plt.savefig('global_model.png')
     
-    '''
+    
 if __name__ == "__main__":
     config_path = os.path.abspath("conf")
     with initialize_config_dir(config_dir=config_path, version_base=None):

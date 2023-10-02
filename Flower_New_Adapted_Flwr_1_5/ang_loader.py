@@ -17,6 +17,8 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         img = np.array(nib.load(filenames[0]).dataobj)  
         self.num_slices_per_scan = img.shape[self.slice_dim]
         self.num_files = len(self.filenames)
+        print(f"Number of 3D volumes: {len(filenames)}")    
+
 
    
         
@@ -136,7 +138,8 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
 
   
         
-            
+        print(f"Number of 3D volumes: {len(batch_filenames)}")
+
         for idz in range(0, len(batch_filenames)):
 
             img_filename = batch_filenames[idz]
@@ -160,6 +163,10 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
 
                 img_stack = np.concatenate((img_stack,img), axis=self.slice_dim)
                 label_stack = np.concatenate((label_stack,label), axis=self.slice_dim)
+        
+        print(f"img_stack shape: {img_stack.shape}")
+        print(f"label_stack shape: {label_stack.shape}")
+
 
         img = img_stack
         label = label_stack
@@ -274,13 +281,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     #IID Partitioning
 
     train_data = pd.read_csv('BRaTSdataset_filenames.csv')
-    # Splitting the data into training and testing sets using indices
-    train_indices, test_indices = train_test_split(train_data.index, test_size=0.1, random_state=42)
 
-    train_dataset = train_data.iloc[train_indices]
-    test_dataset = train_data.iloc[test_indices]
-
-    client_sets = split_into_n_partitions(train_dataset,num_partitions)
+    client_sets = split_into_n_partitions(train_data,num_partitions)
          #trainsets[0] gives file names for training data for client 0
     '''for t in trainsets:
         print(t)
@@ -325,8 +327,11 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
         valloaders.append(ds_val_gen)
         
 
-    # Convert test files to actual data
-    file_names_test = test_dataset['path'].tolist()
+
+    train_data = pd.read_csv('dataset_test.csv')
+
+
+    file_names_test = train_data['image'].tolist()
     file_names_test = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_test]
 
     testloader = SerializableDatasetGenerator(file_names_test, 
@@ -334,9 +339,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-    tf_test_dataset = testloader
         
-    return trainloaders, valloaders, tf_test_dataset, input_shape, output_shape
+    return trainloaders, valloaders, testloader, input_shape, output_shape
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September
 def count_images_in_loader(loader):
@@ -357,21 +361,34 @@ def count_images_in_loader(loader):
         
     return total_images
 
+def count_images_in_loader2(loader):
+    total_images = 0
+    num_batches = len(loader)
+    num_slices_per_scan = loader.num_slices_per_scan  # 155 as verified
+    
+    for idx in range(num_batches):
+        start_idx = idx * loader.batch_size
+        end_idx = (idx + 1) * loader.batch_size
+        actual_batch_size = min(end_idx, len(loader.filenames)) - start_idx
+        total_images += actual_batch_size * num_slices_per_scan  # total_images in this batch
+    
+    return total_images
 
 
 
 def main():
     
     
-    trainloaders, valloaders, testloader = load_datasets(num_partitions=2,batch_size=128,  val_ratio=0.1)
+    trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(num_partitions=8,batch_size=20,  val_ratio=0.1)
+    print("Loaded")
    
     # Counting images in trainloaders and valloaders for each client
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
         print(f"Client {idx + 1}:")
-        print(f"Number of images in trainloader: {count_images_in_loader(trainloader)}")
-        print(f"Number of images in valloader: {count_images_in_loader(valloader)}")
+        print(f"Number of images in trainloader: {count_images_in_loader2(trainloader)}")
+        print(f"Number of images in valloader: {count_images_in_loader2(valloader)}")
         print("----------------------")
 
     # # Counting images in testloader
-    # print(f"Number of images in testloader: {count_images_in_loader(testloader, 20)}")
+    print(f"Number of images in testloader: {count_images_in_loader2(testloader)}")
 if __name__ == "__main__": main()
