@@ -143,12 +143,6 @@ class unet(object):
         Also, the log allows avoidance of the division which
         can help prevent underflow when the numbers are very small.
         """
-        print("In dice_coef_loss")
-        print("Shape of y_true:", tf.shape(target))
-        print("Shape of y_pred:", tf.shape(prediction))
-
-        print(" Shape of y_true:", tf.shape(target))
-        print(" Shape of y_pred:", tf.shape(prediction))
         intersection = tf.reduce_sum(prediction * target, axis=axis)
         p = tf.reduce_sum(prediction, axis=axis)
         t = tf.reduce_sum(target, axis=axis)
@@ -187,11 +181,6 @@ class unet(object):
 
         num_chan_in = imgs_shape[self.concat_axis]
         num_chan_out = msks_shape[self.concat_axis]
-        print("In Unet class: def unet-model method:")
-        print("imgs_shape = ", imgs_shape)
-        print("msks_Shape = ",imgs_shape)
-        print("num_cha_in = ",num_chan_in)
-        print("num_cha_out = ",num_chan_out)
 
         # You can make the network work on variable input height and width
         # if you pass None as the height and width
@@ -406,41 +395,30 @@ class FlowerClient(fl.client.NumPyClient):
     # def __init__(self, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
 
         super().__init__()
-        print("FlowerClient init_______________")
         self.trainloader = trainloader
         self.valloader = valloader
         #Instatiate the model that will be trained
-        print("Get the model")
         #self.model = get_model(model_input_shape,model_output_shape)
         self.model = get_model([128, 128, 1],[128, 128, 1])
-        
-        print("Managaged to get model in FlowerClient init")
         self.num_train_samples = num_train_samples
         self.num_val_samples = num_val_samples
         self.model_input_shape = [128, 128, 1]
         self.model_output_shape = [128, 128, 1]
     
     def get_parameters(self, config):
-        print("get_parameters_______________") 
-        param = self.model.get_weights()#.numpy()
-        print("Param type: ",type(param))
+        param = self.model.get_weights()
         return param
 
     def fit(self, parameters, config):
-        print("fit()_______________")
         #parameters is a list of numpy arrays representing the weights of the global model
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
         epochs = config['local_epochs']
-        # model_filename, model_callbacks = self.model.get_callbacks() 
-        # NOTE I removed the callbacks since it would cause the models to save to the same location thus overriding each other
-        # train_dataset = self.trainloader # Wrapped dataset for serialization
         self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
         print("from client fit: len(self.trainloader)=",self.num_train_samples)
         return self.model.get_weights(), self.num_train_samples, {} # for sending anything (like run time or metrics) to server
 
     def evaluate(self, parameters, config):
-        print("evaluate_______________")
         # get global model to be evaluated on client's validation data
         self.model.set_weights(parameters)
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
@@ -451,7 +429,6 @@ class FlowerClient(fl.client.NumPyClient):
 def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
 # def get_client_fn(num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
 
-    print("get client fn _______________")
     #to simulate clients
     # Return a function that can be used by the VirtualClientEngine.
 
@@ -480,16 +457,24 @@ def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_s
     return client_fn
 
 def get_model(input_shape, output_shape):
-   print("Getting model")
    u_net = unet() 
    model= u_net.create_model([128, 128, 1], [128, 128, 1], final=False)
-   print("Returning model")
    return model
+
+# This method can go in server.py
+def get_on_fit_config(config: DictConfig):
+    def fit_config_fn(server_round: int):
+
+        #if server_round > 50:
+        #    lr = config.lr /10
+        return {'lr':config.lr, 'local_epochs':config.local_epochs}
     
+    return fit_config_fn
+
+# This method can go in server.py    
 def get_evaluate_fn(testset,input_shape,output_shape):
 #def get_evaluate_fn(input_shape,output_shape):
 
-    print("get_evaluated_fn_______________")
 
     """Return an evaluation function for server-side (i.e. centralised) evaluation."""
 
@@ -497,18 +482,14 @@ def get_evaluate_fn(testset,input_shape,output_shape):
     # The `evaluate` function will be called after every round by the strategy
     def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar],):
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
-        print("About to set weights_________________")
         model.set_weights(parameters)  # Update model with the latest parameters
-        print("Finished setting weights_______________")
         loss, dice_coef, soft_dice_coef = model.evaluate(testset, verbose=2)
         
         return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef}
-    print("about to return get_evaluated_fn")
     return evaluate
 
 
 def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
-    print("weighted average_______________")
     """Aggregation function for (federated) evaluation metrics.
 
     It will aggregate those metrics returned by the client's evaluate() method.
@@ -533,6 +514,7 @@ def main(cfg: DictConfig) -> None:
     # Create dataset partitions (needed if your dataset is not pre-partitioned)
     
     # 1. Load Data
+    print("Loading and Partitioning Data")
     trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
     # Check that the batches
     print("Data Loaded")
@@ -589,6 +571,7 @@ def main(cfg: DictConfig) -> None:
         min_available_clients=int(
             cfg.num_clients * 1
         ),  # Wait until at least n clients are available
+        on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
         evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function
         # evaluate_fn=get_evaluate_fn(input_shape, output_shape),  # global evaluation function

@@ -6,8 +6,6 @@ batch_size: 20
 num_clients_per_round_fit: 2
 num_clients_per_round_eval: 2
 
-backbone: 'resnet34'
-encoder_weights: None
 config_fit:
   lr: 0.0001
   momentm: 0.9

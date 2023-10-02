@@ -41,10 +41,15 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         if self.idy >= self.num_slices_per_scan:
             self.idy = 0
         return batch_data, batch_labels
-            
+
     def on_epoch_end(self):
         np.random.seed(self.seed)
-        np.random.shuffle(self.indexes)
+        indexes_copy = np.copy(self.indexes)
+        np.random.shuffle(indexes_copy)
+        self.indexes = indexes_copy        
+    # def on_epoch_end(self):
+    #     np.random.seed(self.seed)
+    #     np.random.shuffle(self.indexes)
     
     def preprocess_img(self, img):
         """
