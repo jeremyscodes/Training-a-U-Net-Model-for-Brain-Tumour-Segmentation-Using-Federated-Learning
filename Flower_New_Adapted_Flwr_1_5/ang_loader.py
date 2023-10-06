@@ -281,8 +281,13 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     #IID Partitioning
 
     train_data = pd.read_csv('BRaTSdataset_filenames.csv')
+    # Splitting the data into training and testing sets using indices
+    train_indices, test_indices = train_test_split(train_data.index, test_size=0.1, random_state=42)
 
-    client_sets = split_into_n_partitions(train_data,num_partitions)
+    train_dataset = train_data.iloc[train_indices]
+    test_dataset = train_data.iloc[test_indices]
+
+    client_sets = split_into_n_partitions(train_dataset,num_partitions)
          #trainsets[0] gives file names for training data for client 0
     '''for t in trainsets:
         print(t)
@@ -328,10 +333,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
         
 
 
-    train_data = pd.read_csv('dataset_test.csv')
-
-
-    file_names_test = train_data['image'].tolist()
+     # Convert test files to actual data
+    file_names_test = test_dataset['path'].tolist()
     file_names_test = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_test]
 
     testloader = SerializableDatasetGenerator(file_names_test, 
