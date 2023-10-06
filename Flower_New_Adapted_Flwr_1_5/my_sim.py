@@ -1,5 +1,5 @@
 print("Running")
-
+import matplotlib.pyplot as plt
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
 import flwr as fl
@@ -657,21 +657,47 @@ def main(cfg: DictConfig) -> None:
     print("Got to end of uncommented code")
     
     
-    import matplotlib.pyplot as plt
+    
 
     print(f"{history.metrics_centralized = }")
 
-    global_accuracy_centralised = history.metrics_centralized["dice_coef"]
-    round = [data[0] for data in global_accuracy_centralised]
-    acc = [100.0 * data[1] for data in global_accuracy_centralised]
-    plt.plot(round, acc)
+    global_dice_centralised = history.metrics_centralized["dice_coef"]
+    round = [data[0] for data in global_dice_centralised]
+    dice = [100.0 * data[1] for data in global_dice_centralised]
+    plt.plot(round, dice)
     plt.grid()
-    plt.ylabel("Accuracy (%)")
+    plt.ylabel("Dice Coefficient (%)")
     plt.xlabel("Round")
     plt.title("BRATS - IID - 2 clients with 10 clients per round")
     # save the plot
     plt.savefig('global_model.png')
-    
+    plt.figure()
+
+    # Plotting local loss
+    for client_idx, client_losses in enumerate(history.losses_distributed):
+        rounds, loss_values = zip(*client_losses)
+        plt.plot(rounds, loss_values, label=f'Client {client_idx} Loss')
+    plt.xlabel('Round')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title('Local Losses per Client per Round')
+    plt.grid()
+    plt.savefig('local_losses.png')
+
+    # Resetting the figure for the next plot
+    plt.figure()
+
+    # Plotting local metric (e.g., dice_coef)
+    for client_idx, client_metrics in enumerate(history.metrics_distributed['dice_coef']):
+        rounds, metric_values = zip(*client_metrics)
+        plt.plot(rounds, [100.0 * value for value in metric_values], label=f'Client {client_idx} Dice Coef')
+    plt.xlabel('Round')
+    plt.ylabel('Dice Coef (%)')
+    plt.legend()
+    plt.title('Local Dice Coef per Client per Round')
+    plt.grid()
+    plt.savefig('local_dice_coef.png')
+        
     
 if __name__ == "__main__":
     config_path = os.path.abspath("conf")

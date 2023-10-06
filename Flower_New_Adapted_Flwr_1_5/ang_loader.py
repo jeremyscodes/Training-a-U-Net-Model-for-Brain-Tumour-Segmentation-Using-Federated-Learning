@@ -17,7 +17,7 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
         img = np.array(nib.load(filenames[0]).dataobj)  
         self.num_slices_per_scan = img.shape[self.slice_dim]
         self.num_files = len(self.filenames)
-        print(f"Number of 3D volumes: {len(filenames)}")    
+        # print(f"Number of 3D volumes: {len(filenames)}")    
 
 
    
@@ -138,7 +138,7 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
 
   
         
-        print(f"Number of 3D volumes: {len(batch_filenames)}")
+        # print(f"Number of 3D volumes: {len(batch_filenames)}")
 
         for idz in range(0, len(batch_filenames)):
 
@@ -164,8 +164,8 @@ class SerializableDatasetGenerator(tf.keras.utils.Sequence):
                 img_stack = np.concatenate((img_stack,img), axis=self.slice_dim)
                 label_stack = np.concatenate((label_stack,label), axis=self.slice_dim)
         
-        print(f"img_stack shape: {img_stack.shape}")
-        print(f"label_stack shape: {label_stack.shape}")
+        # print(f"img_stack shape: {img_stack.shape}")
+        # print(f"label_stack shape: {label_stack.shape}")
 
 
         img = img_stack
