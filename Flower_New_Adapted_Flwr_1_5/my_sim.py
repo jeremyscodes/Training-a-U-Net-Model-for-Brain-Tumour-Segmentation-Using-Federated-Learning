@@ -1,4 +1,5 @@
 print("Running")
+from collections import defaultdict
 import matplotlib.pyplot as plt
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
@@ -8,6 +9,7 @@ import psutil
 from typing import Dict, List, Tuple
 from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
+import numpy as np
 
 import sys
 from ang_loader import load_datasets #using new loader (serializable)
@@ -385,7 +387,7 @@ parser.add_argument(
 parser.add_argument(
     "--num_gpus",
     type=float,
-    default=0.0,
+    default=0.5,
     help="Ratio of GPU memory to assign to a virtual client",
 )
 
@@ -414,9 +416,17 @@ class FlowerClient(fl.client.NumPyClient):
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
         epochs = config['local_epochs']
-        self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
-        print("from client fit: len(self.trainloader)=",self.num_train_samples)
-        return self.model.get_weights(), self.num_train_samples, {} # for sending anything (like run time or metrics) to server
+        history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
+        # Return the metrics along with the model weights
+        results = {
+            'loss': history.history['loss'][0],
+            'dice_coef': history.history['dice_coef'][0],
+            'soft_dice_coef': history.history['soft_dice_coef'][0],
+            # 'val_loss': history.history['val_loss'][0],
+            # 'val_dice_coef': history.history['val_dice_coef'][0],
+            # 'val_soft_dice_coef': history.history['val_soft_dice_coef'][0]
+        }
+        return self.model.get_weights(), self.num_train_samples, results # for sending anything (like run time or metrics) to server
 
     def evaluate(self, parameters, config):
         # get global model to be evaluated on client's validation data
@@ -427,7 +437,6 @@ class FlowerClient(fl.client.NumPyClient):
 
 
 def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
-# def get_client_fn(num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
 
     #to simulate clients
     # Return a function that can be used by the VirtualClientEngine.
@@ -504,72 +513,39 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
         "dice_coef": sum(dice_coef) / sum(examples),
         "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
     }
-#testing functions
-def masks_which_contain_ones():
-        found_ones = False
-        for i in range(len(trainloaders[0])):
-            if tf.reduce_sum(trainloaders[0][i][1]) > 0:
-                print("Mask number ",i," for client1 contains ones")
-                found_ones = True
-        if not found_ones:
-            print("No masks with white pixels found in trainloaders[0]")
-# The above test returned the correct result, there are are masks with white pixels in trainloaders[0]
-def count_samples_in_batches(trainloaders):
-    partitions_count = []
-    for i, loader in enumerate(trainloaders):
-        count = 0
-        # Iterate over each batch in the loader
-        for batch_data, batch_labels in loader:
-            # Assuming batch_data is in the shape (batch_size, height, width, channels)
-            # and each slice in the batch is a sample
-            count += batch_data.shape[0]  # Add the number of slices in the current batch to the count
-            print("num slices in batch = ",batch_data.shape[0])
-        partitions_count.append(count)
-        print(f'Partition {i + 1} has {count} slices.')
-    return partitions_count
 
+class CustomFedAvg(fl.server.strategy.FedAvg):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.client_metrics = defaultdict(list)  # Store metrics for each client
+
+    def aggregate_fit(self, rnd, results, failures):
+        print("Aggregating fit")
+        for client_proxy, fit_res in results:
+            client_id = client_proxy.cid  # Assuming the ClientProxy has a 'cid' attribute for client ID
+            self.client_metrics[client_id].append(fit_res.metrics)
+        aggregated_metrics = super().aggregate_fit(rnd, results, failures)
+        return aggregated_metrics
+    #  Each key in the dictionary is a client ID, and the associated value is a list of metrics for that client over the rounds.
 
 def main(cfg: DictConfig) -> None:
     
-    # enable_tf_gpu_growth()
+    enable_tf_gpu_growth()
     # Parse input arguments
     args = parser.parse_args()
+    print("Number of Clients: ",cfg.num_clients)
+    print("Number of Clients per round: ",cfg.num_clients_per_round_fit)
+    print("Number of Rounds: ",cfg.num_rounds)
+    print("Number of Local Epochs: ",cfg.config_fit.local_epochs)
+    print("Batch Size: ",cfg.batch_size)
+    
     
     # Create dataset partitions (needed if your dataset is not pre-partitioned)
     
     # 1. Load Data
     print("Loading and Partitioning Data")
     trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
-    # write a function that checks which masks in trainloaders[0] have white pixels
     
-    # def print_trainloader_sizes():
-    #     for i, trainloader in enumerate(trainloaders):
-    #         num_samples = 0
-    #         for batch in trainloader:
-    #             num_samples += batch[0].shape[0]
-    #         print(f"Trainloader {i} has {num_samples} samples")
-    # print_trainloader_sizes()
-    
-    # Call the function with your trainloaders
-
-    print("Trainloaders")
-    absolute_counts_train = count_samples_in_batches(trainloaders)  
-    print("Valloaders")
-    absolute_counts_val = count_samples_in_batches(valloaders)     
-    ls =[]
-    ls.append(testloader)
-    print("Testloader")
-    absolute_counts_test = count_samples_in_batches(ls)  
-    # print the sum of all samples using the absolute_counts_trian absolute_counts_val and absolute_counts_test
-    
-    print("Sum of all samples in trainloaders = ",sum(absolute_counts_train))
-    print("Sum of all samples in valloaders = ",sum(absolute_counts_val))
-    print("Sum of all samples in testloader = ",sum(absolute_counts_test))
-    # print sum of sums
-    print("Sum of all samples = ",sum(absolute_counts_train)+sum(absolute_counts_val)+sum(absolute_counts_test))
-    print("Finished")
-    
-    # masks_which_contain_ones()
     # Check that the batches
     print("Data Loaded")
     num_clients=len(trainloaders)
@@ -589,35 +565,9 @@ def main(cfg: DictConfig) -> None:
     num_train_samples_clients = train_sample_dict[cfg.num_clients]
     # get num vallidation sample for each client from val_sample_dict
     num_val_samples_clients = val_sample_dict[cfg.num_clients]
-    
-    #
-    
-    # I checked that these values are the same as the original train.py
-    # print(input_shape,output_shape)
-    
-    #Example of how to load, and train
-    # client1_train = trainloaders[0]
-    
-    # u_net = unet()
-    # model= u_net.create_model(client1_train.get_input_shape(),client1_train.get_output_shape() , final=False) 
-    # print("client1_train.get_input_shape()= ",client1_train.get_input_shape())
-    # print("client1_train.get_output_shape() = ",client1_train.get_output_shape())
-    # # [x] get weights into params var
-    # param = model.get_weights()
-    # # [x] set param
-    # model.set_weights(param)
-    # # [x] fit model
-    # print("Fitting, 1 epoch")
-    # model.fit(client1_train, epochs=1, validation_data=valloaders[0],  verbose=2)#, callbacks=model_callbacks)
-    # print("Evaluate Model")
-    # loss, dc, soft_DC = model.evaluate(testloader,verbose=2)
-    # print(loss,dc,soft_DC)
-    # print("All good!")
-
-    
 
     # Create FedAvg strategy
-    strategy = fl.server.strategy.FedAvg(
+    strategy = CustomFedAvg(
         fraction_fit=1,  # Sample 10% of available clients for training
         fraction_evaluate=1,  # Sample 5% of available clients for evaluation
         min_fit_clients=cfg.num_clients_per_round_fit ,  # Never sample less than 10 clients for training
@@ -626,10 +576,9 @@ def main(cfg: DictConfig) -> None:
             cfg.num_clients * 1
         ),  # Wait until at least n clients are available
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
+        # NOTE to debug i commented the line below
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
         evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function
-        # evaluate_fn=get_evaluate_fn(input_shape, output_shape),  # global evaluation function
-
     )
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
@@ -642,8 +591,6 @@ def main(cfg: DictConfig) -> None:
     # Start simulation
     history = fl.simulation.start_simulation(
         client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
-        # client_fn=get_client_fn(num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
-
         num_clients=cfg.num_clients,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
         strategy=strategy,
@@ -654,10 +601,55 @@ def main(cfg: DictConfig) -> None:
         }
     ) 
     
-    print("Got to end of uncommented code")
-    
-    
-    
+    print("Got to end of simulation")
+    # Initialize a new figure for plotting
+    plt.figure(figsize=(15, 5 * len(strategy.client_metrics)))
+
+    # Loop over each client's metrics for plotting
+    for idx, (client_id, metrics_list) in enumerate(strategy.client_metrics.items()):
+        losses = [metrics['loss'] for metrics in metrics_list]
+        dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
+        soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
+        # save as npy file
+        np.save(f'client_{client_id}_losses.npy', losses)
+        np.save(f'client_{client_id}_dice_coefs.npy', dice_coefs)
+        np.save(f'client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
+
+        # Plotting Loss for the client
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 1)
+        plt.plot(losses, label=f'Client {client_id} Loss')
+        plt.title(f'Client {client_id} Loss over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Loss')
+        plt.xticks(range(len(losses)))
+        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+        # Plotting Dice Coefficient for the client
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 2)
+        plt.plot(dice_coefs, label=f'Client {client_id} Dice Coefficient')
+        plt.title(f'Client {client_id} Dice Coefficient over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Dice Coefficient')
+        plt.xticks(range(len(dice_coefs)))
+        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+        # Plotting Soft Dice Coefficient for the client
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 3)
+        plt.plot(soft_dice_coefs, label=f'Client {client_id} Soft Dice Coefficient')
+        plt.title(f'Client {client_id} Soft Dice Coefficient over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Soft Dice Coefficient')
+        plt.xticks(range(len(soft_dice_coefs)))
+        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+    # Adjust layout and display the plots
+    plt.tight_layout()
+    plt.savefig('client_plots.png')
+    plt.figure()
+
 
     print(f"{history.metrics_centralized = }")
 
@@ -672,31 +664,6 @@ def main(cfg: DictConfig) -> None:
     # save the plot
     plt.savefig('global_model.png')
     plt.figure()
-
-    # Plotting local loss
-    for client_idx, client_losses in enumerate(history.losses_distributed):
-        rounds, loss_values = zip(*client_losses)
-        plt.plot(rounds, loss_values, label=f'Client {client_idx} Loss')
-    plt.xlabel('Round')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.title('Local Losses per Client per Round')
-    plt.grid()
-    plt.savefig('local_losses.png')
-
-    # Resetting the figure for the next plot
-    plt.figure()
-
-    # Plotting local metric (e.g., dice_coef)
-    for client_idx, client_metrics in enumerate(history.metrics_distributed['dice_coef']):
-        rounds, metric_values = zip(*client_metrics)
-        plt.plot(rounds, [100.0 * value for value in metric_values], label=f'Client {client_idx} Dice Coef')
-    plt.xlabel('Round')
-    plt.ylabel('Dice Coef (%)')
-    plt.legend()
-    plt.title('Local Dice Coef per Client per Round')
-    plt.grid()
-    plt.savefig('local_dice_coef.png')
         
     
 if __name__ == "__main__":
