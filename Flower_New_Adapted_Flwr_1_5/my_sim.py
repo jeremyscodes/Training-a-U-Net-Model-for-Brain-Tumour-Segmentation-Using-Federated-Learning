@@ -11,6 +11,41 @@ from typing import Dict, List, Tuple
 from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 import numpy as np
+import concurrent.futures
+import timeit
+from logging import DEBUG, INFO
+from flwr.common import (
+    Code,
+    DisconnectRes,
+    EvaluateIns,
+    EvaluateRes,
+    FitIns,
+    FitRes,
+    Parameters,
+    ReconnectIns,
+    Scalar,
+)
+from flwr.common.logger import log
+from flwr.common.typing import GetParametersIns
+from flwr.server.client_manager import ClientManager
+from flwr.server.client_proxy import ClientProxy
+from flwr.server.history import History
+from flwr.server.strategy import FedAvg, Strategy
+from typing import Dict, List, Optional, Tuple, Union
+
+FitResultsAndFailures = Tuple[
+    List[Tuple[ClientProxy, FitRes]],
+    List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+]
+EvaluateResultsAndFailures = Tuple[
+    List[Tuple[ClientProxy, EvaluateRes]],
+    List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
+]
+ReconnectResultsAndFailures = Tuple[
+    List[Tuple[ClientProxy, DisconnectRes]],
+    List[Union[Tuple[ClientProxy, DisconnectRes], BaseException]],
+]
+
 
 import sys
 from ang_loader import load_datasets #using new loader (serializable)
@@ -482,7 +517,7 @@ def get_on_fit_config(config: DictConfig):
     return fit_config_fn
 
 # This method can go in server.py    
-def get_evaluate_fn(testset,input_shape,output_shape):
+def get_evaluate_fn(valset,input_shape,output_shape):
 #def get_evaluate_fn(input_shape,output_shape):
 
 
@@ -493,7 +528,7 @@ def get_evaluate_fn(testset,input_shape,output_shape):
     def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar],):
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, dice_coef, soft_dice_coef = model.evaluate(testset, verbose=2)
+        loss, dice_coef, soft_dice_coef = model.evaluate(valset, verbose=2)
         
         return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef}
     return evaluate
@@ -529,48 +564,121 @@ class CustomFedAvg(fl.server.strategy.FedAvg):#FedAdam
         return aggregated_metrics
     #  Each key in the dictionary is a client ID, and the associated value is a list of metrics for that client over the rounds.
 
-class CustomServer(Server):
-    def __init__(self, strategy: CustomFedAvg, config):
-        super().__init__(strategy, config)
-        self.prev_global_accuracy = 0.0  # Store the previous global accuracy
-        self.tolerance = 0.001  # Tolerance for change in accuracy
-        
+class Server:
+    """Flower server."""
 
-    def fit(self, num_rounds: int) -> None:
-        best_val_loss = float('inf')  # Initialize with a high value
-        best_weights = None  # To store the best model weights
-        rounds_without_improvement = 0  # Counter for patience
-        early_stopping_triggered = False
+    def __init__(
+        self,
+        *,
+        client_manager: ClientManager,
+        strategy: Optional[Strategy] = None,
+    ) -> None:
+        self._client_manager: ClientManager = client_manager
+        self.parameters: Parameters = Parameters(
+            tensors=[], tensor_type="numpy.ndarray"
+        )
+        self.strategy: Strategy = strategy if strategy is not None else FedAvg()
+        self.max_workers: Optional[int] = None
+        self.prev_val_loss = float('inf')  # For early stopping
+        self.rounds_without_improvement = 0  # For early stopping
+        self.patience = 90  # Patience for early stopping
 
-        for current_round in range(self.config.num_rounds):
-            # Start of the federated training round
-            results, failures = self.strategy.fit_round(self, current_round)
-            
-            # Aggregate the results using CustomFedAvg strategy
-            weights, metrics = self.strategy.aggregate_fit(current_round, results, failures)
-            
-            # Assuming 'val_loss' is one of the metrics you're tracking
-            current_val_loss = metrics.get("val_loss", float('inf'))
-            
-            # Check for early stopping based on validation loss
-            if current_val_loss < best_val_loss:
-                best_val_loss = current_val_loss
-                best_weights = weights  # Save the best weights
-                rounds_without_improvement = 0  # Reset the counter
-            else:
-                rounds_without_improvement += 1
+    def set_max_workers(self, max_workers: Optional[int]) -> None:
+        """Set the max_workers used by ThreadPoolExecutor."""
+        self.max_workers = max_workers
 
-            # If patience is exceeded, stop training
-            if rounds_without_improvement >= 90:
-                print("Early stopping triggered due to no improvement in validation loss for 90 rounds.")
-                print("The final validation loss was: ",best_val_loss, " which was achieved on round ",current_round-90)
-                self._save_model(best_weights)
-                early_stopping_triggered = True
-                break
-        # If training completes without early stopping, save the last model
-        if not early_stopping_triggered:
-            print("Training completed without early stopping.")
-            self._save_model(best_weights)
+    def set_strategy(self, strategy: Strategy) -> None:
+        """Replace server strategy."""
+        self.strategy = strategy
+
+    def client_manager(self) -> ClientManager:
+        """Return ClientManager."""
+        return self._client_manager
+
+    def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
+        """Run federated averaging for a number of rounds."""
+        history = History()
+
+        # Initialize parameters
+        log(INFO, "Initializing global parameters")
+        self.parameters = self._get_initial_parameters(timeout=timeout)
+        log(INFO, "Evaluating initial parameters")
+        res = self.strategy.evaluate(0, parameters=self.parameters)
+        if res is not None:
+            log(
+                INFO,
+                "initial parameters (loss, other metrics): %s, %s",
+                res[0],
+                res[1],
+            )
+            history.add_loss_centralized(server_round=0, loss=res[0])
+            history.add_metrics_centralized(server_round=0, metrics=res[1])
+
+        # Run federated learning for num_rounds
+        log(INFO, "FL starting")
+        start_time = timeit.default_timer()
+
+        for current_round in range(1, num_rounds + 1):
+            # Train model and replace previous global model
+            res_fit = self.fit_round(
+                server_round=current_round,
+                timeout=timeout,
+            )
+            if res_fit is not None:
+                parameters_prime, fit_metrics, _ = res_fit
+                if parameters_prime:
+                    self.parameters = parameters_prime
+                history.add_metrics_distributed_fit(
+                    server_round=current_round, metrics=fit_metrics
+                )
+
+            # Evaluate model using strategy implementation
+            res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
+            if res_cen is not None:
+                loss_cen, metrics_cen = res_cen
+                # NOTE Early stopping logic
+                if loss_cen >= self.prev_val_loss:
+                    self.rounds_without_improvement += 1
+                else:
+                    self.rounds_without_improvement = 0
+                    self.prev_val_loss = loss_cen
+
+                if self.rounds_without_improvement >= self.patience:
+                    print("Early stopping triggered due to no improvement in validation loss for", self.patience, "rounds.")
+                    print("The final validation loss was: ", self.prev_val_loss, " which was achieved on round ", current_round - self.patience)
+                    break
+
+                log(
+                    INFO,
+                    "fit progress: (%s, %s, %s, %s)",
+                    current_round,
+                    loss_cen,
+                    metrics_cen,
+                    timeit.default_timer() - start_time,
+                )
+                history.add_loss_centralized(server_round=current_round, loss=loss_cen)
+                history.add_metrics_centralized(
+                    server_round=current_round, metrics=metrics_cen
+                )
+
+            # Evaluate model on a sample of available clients
+            res_fed = self.evaluate_round(server_round=current_round, timeout=timeout)
+            if res_fed is not None:
+                loss_fed, evaluate_metrics_fed, _ = res_fed
+                if loss_fed is not None:
+                    history.add_loss_distributed(
+                        server_round=current_round, loss=loss_fed
+                    )
+                    history.add_metrics_distributed(
+                        server_round=current_round, metrics=evaluate_metrics_fed
+                    )
+
+        # Bookkeeping
+        end_time = timeit.default_timer()
+        elapsed = end_time - start_time
+        log(INFO, "FL finished in %s", elapsed)
+        return history
+
 
     def _save_model(self, weights):
         model = get_model([128, 128, 1], [128, 128, 1])
