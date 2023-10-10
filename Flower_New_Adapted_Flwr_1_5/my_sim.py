@@ -514,7 +514,7 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
         "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
     }
 
-class CustomFedAvg(fl.server.strategy.FedAvg):
+class CustomFedAvg(fl.server.strategy.FedAvg):#FedAdam
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.client_metrics = defaultdict(list)  # Store metrics for each client
@@ -576,9 +576,8 @@ def main(cfg: DictConfig) -> None:
             cfg.num_clients * 1
         ),  # Wait until at least n clients are available
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
-        # NOTE to debug i commented the line below
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
-        evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function
+        evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
     )
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
@@ -615,14 +614,18 @@ def main(cfg: DictConfig) -> None:
         np.save(f'client_{client_id}_dice_coefs.npy', dice_coefs)
         np.save(f'client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
 
+        losses = [100.0 * data for data in losses]
+        dice_coefs = [100.0 * data for data in dice_coefs]
+        soft_dice_coefs = [100.0 * data for data in soft_dice_coefs]
+
         # Plotting Loss for the client
         plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 1)
         plt.plot(losses, label=f'Client {client_id} Loss')
         plt.title(f'Client {client_id} Loss over Rounds')
         plt.xlabel('Rounds')
         plt.ylabel('Loss')
-        plt.xticks(range(len(losses)))
-        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.xticks(range(0,len(losses)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
         plt.legend()
 
         # Plotting Dice Coefficient for the client
@@ -630,9 +633,9 @@ def main(cfg: DictConfig) -> None:
         plt.plot(dice_coefs, label=f'Client {client_id} Dice Coefficient')
         plt.title(f'Client {client_id} Dice Coefficient over Rounds')
         plt.xlabel('Rounds')
-        plt.ylabel('Dice Coefficient')
-        plt.xticks(range(len(dice_coefs)))
-        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.ylabel('Dice Coefficient (%)')
+        plt.xticks(range(0,len(dice_coefs)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
         plt.legend()
 
         # Plotting Soft Dice Coefficient for the client
@@ -640,9 +643,9 @@ def main(cfg: DictConfig) -> None:
         plt.plot(soft_dice_coefs, label=f'Client {client_id} Soft Dice Coefficient')
         plt.title(f'Client {client_id} Soft Dice Coefficient over Rounds')
         plt.xlabel('Rounds')
-        plt.ylabel('Soft Dice Coefficient')
-        plt.xticks(range(len(soft_dice_coefs)))
-        plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.ylabel('Soft Dice Coefficient (%)')
+        plt.xticks(range(0,len(soft_dice_coefs)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
         plt.legend()
 
     # Adjust layout and display the plots
