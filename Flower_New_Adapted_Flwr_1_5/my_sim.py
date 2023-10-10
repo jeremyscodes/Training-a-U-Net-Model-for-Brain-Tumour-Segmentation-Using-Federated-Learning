@@ -6,6 +6,7 @@ os.environ["SM_FRAMEWORK"] = "tf.keras"
 import flwr as fl
 import tensorflow as tf
 import psutil
+from flwr.server import Server
 from typing import Dict, List, Tuple
 from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
@@ -393,17 +394,15 @@ parser.add_argument(
 
 #
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self,trainloader,valloader, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
+    def __init__(self,trainloader, num_train_samples,  model_input_shape, model_output_shape)->None:
     # def __init__(self, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
 
         super().__init__()
         self.trainloader = trainloader
-        self.valloader = valloader
         #Instatiate the model that will be trained
         #self.model = get_model(model_input_shape,model_output_shape)
         self.model = get_model([128, 128, 1],[128, 128, 1])
         self.num_train_samples = num_train_samples
-        self.num_val_samples = num_val_samples
         self.model_input_shape = [128, 128, 1]
         self.model_output_shape = [128, 128, 1]
     
@@ -416,7 +415,9 @@ class FlowerClient(fl.client.NumPyClient):
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
         epochs = config['local_epochs']
-        history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
+        # history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
+        history = self.model.fit(self.trainloader, epochs=epochs,  verbose=2)#, callbacks=model_callbacks)
+
         # Return the metrics along with the model weights
         results = {
             'loss': history.history['loss'][0],
@@ -427,16 +428,16 @@ class FlowerClient(fl.client.NumPyClient):
             # 'val_soft_dice_coef': history.history['val_soft_dice_coef'][0]
         }
         return self.model.get_weights(), self.num_train_samples, results # for sending anything (like run time or metrics) to server
-
+'''
     def evaluate(self, parameters, config):
         # get global model to be evaluated on client's validation data
         self.model.set_weights(parameters)
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
         loss, dice_coef, soft_dice_coef = self.model.evaluate(self.valloader, verbose=2)
         return float(loss), self.num_val_samples, {'dice_coef':dice_coef, 'soft_dice_coef':soft_dice_coef}
+'''
 
-
-def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
+def get_client_fn(trainloaders, num_train_samples_clients, model_input_shape, model_output_shape):
 
     #to simulate clients
     # Return a function that can be used by the VirtualClientEngine.
@@ -451,9 +452,9 @@ def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_s
         # Returns a normal FLowerClient that will use the cid-th train/val
         # dataloaders as it's local data.
         return FlowerClient(trainloader=trainloaders[int(cid)],
-                            valloader=valloaders[int(cid)],
+                            # valloader=valloaders[int(cid)],
                             num_train_samples=num_train_samples_clients[int(cid)],# this indexes into the list and pulls out the number of samples this client model trains on
-                            num_val_samples=num_val_samples_clients[int(cid)],
+                            # num_val_samples=num_val_samples_clients[int(cid)],
                             model_input_shape=model_input_shape,
                             model_output_shape=model_output_shape
                             )
@@ -528,6 +529,54 @@ class CustomFedAvg(fl.server.strategy.FedAvg):#FedAdam
         return aggregated_metrics
     #  Each key in the dictionary is a client ID, and the associated value is a list of metrics for that client over the rounds.
 
+class CustomServer(Server):
+    def __init__(self, strategy: CustomFedAvg, config):
+        super().__init__(strategy, config)
+        self.prev_global_accuracy = 0.0  # Store the previous global accuracy
+        self.tolerance = 0.001  # Tolerance for change in accuracy
+        
+
+    def fit(self, num_rounds: int) -> None:
+        best_val_loss = float('inf')  # Initialize with a high value
+        best_weights = None  # To store the best model weights
+        rounds_without_improvement = 0  # Counter for patience
+        early_stopping_triggered = False
+
+        for current_round in range(self.config.num_rounds):
+            # Start of the federated training round
+            results, failures = self.strategy.fit_round(self, current_round)
+            
+            # Aggregate the results using CustomFedAvg strategy
+            weights, metrics = self.strategy.aggregate_fit(current_round, results, failures)
+            
+            # Assuming 'val_loss' is one of the metrics you're tracking
+            current_val_loss = metrics.get("val_loss", float('inf'))
+            
+            # Check for early stopping based on validation loss
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                best_weights = weights  # Save the best weights
+                rounds_without_improvement = 0  # Reset the counter
+            else:
+                rounds_without_improvement += 1
+
+            # If patience is exceeded, stop training
+            if rounds_without_improvement >= 90:
+                print("Early stopping triggered due to no improvement in validation loss for 90 rounds.")
+                print("The final validation loss was: ",best_val_loss, " which was achieved on round ",current_round-90)
+                self._save_model(best_weights)
+                early_stopping_triggered = True
+                break
+        # If training completes without early stopping, save the last model
+        if not early_stopping_triggered:
+            print("Training completed without early stopping.")
+            self._save_model(best_weights)
+
+    def _save_model(self, weights):
+        model = get_model([128, 128, 1], [128, 128, 1])
+        model.set_weights(weights)
+        model.save('best_globa_model.h5')
+
 def main(cfg: DictConfig) -> None:
     
     enable_tf_gpu_growth()
@@ -539,12 +588,9 @@ def main(cfg: DictConfig) -> None:
     print("Number of Local Epochs: ",cfg.config_fit.local_epochs)
     print("Batch Size: ",cfg.batch_size)
     
-    
-    # Create dataset partitions (needed if your dataset is not pre-partitioned)
-    
     # 1. Load Data
     print("Loading and Partitioning Data")
-    trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
+    trainloaders, valloader, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
     
     # Check that the batches
     print("Data Loaded")
@@ -556,15 +602,8 @@ def main(cfg: DictConfig) -> None:
         4:[16895,16895,16895,16895],
         8:[8525,8525,8525,8525,8370,8370,8370,8370]
     }
-    val_sample_dict={
-        2:[3720,3780],
-        4:[1860,1860,1860,1860],
-        8:[930,930,930,930,930,930,930,930]
-    }
     # get num training samples for each client from train_sample_dict
     num_train_samples_clients = train_sample_dict[cfg.num_clients]
-    # get num vallidation sample for each client from val_sample_dict
-    num_val_samples_clients = val_sample_dict[cfg.num_clients]
 
     # Create FedAvg strategy
     strategy = CustomFedAvg(
@@ -577,7 +616,7 @@ def main(cfg: DictConfig) -> None:
         ),  # Wait until at least n clients are available
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
-        evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
+        evaluate_fn=get_evaluate_fn(valloader, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
     )
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
@@ -589,16 +628,22 @@ def main(cfg: DictConfig) -> None:
     
     # Start simulation
     history = fl.simulation.start_simulation(
-        client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
+        client_fn=get_client_fn(trainloaders,num_train_samples_clients, input_shape,output_shape),
         num_clients=cfg.num_clients,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
         strategy=strategy,
+        server_class=CustomServer,
+        server_kwargs={"strategy": strategy, "config": fl.server.ServerConfig(num_rounds=cfg.num_rounds)},
         client_resources=client_resources,
         actor_kwargs={
             "on_actor_init_fn": enable_tf_gpu_growth  # Enable GPU growth upon actor init
             # does nothing if `num_gpus` in client_resources is 0.0
         }
+        
     ) 
+
+    # Get global model and evaluate using test set
+
     
     print("Got to end of simulation")
     # Initialize a new figure for plotting

@@ -282,9 +282,13 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
 
     train_data = pd.read_csv('BRaTSdataset_filenames.csv')
     # Splitting the data into training and testing sets using indices
-    train_indices, test_indices = train_test_split(train_data.index, test_size=0.1, random_state=42)
+    train_indices, test_indices = train_test_split(train_data.index, test_size=0.2, random_state=42)
+    #split train_indices into train and validation
+    train_indices, val_indices = train_test_split(train_indices, test_size=0.25, random_state=42)
+    # Train: 60%, Val: 20%, Test: 20%
 
     train_dataset = train_data.iloc[train_indices]
+    val_indices = train_data.iloc[val_indices]
     test_dataset = train_data.iloc[test_indices]
 
     client_sets = split_into_n_partitions(train_dataset,num_partitions)
@@ -295,22 +299,24 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
 
     # Contains client partitians, inside of which are images_batches and masks_batchs
     trainloaders = []
-    valloaders = []
+
+    #valloaders = []
     first = True
     for client_set in client_sets:
         # Split into training and validation
-        train_val_partitions = split_into_train_val(client_set, val_ratio)  
+
+        # train_val_partitions = split_into_train_val(client_set, val_ratio)  
         #print("partitions[0]")
         # Extract file names from each DataFrame in partitions[0] and concatenate them
         # file_names_train = [fname for tup in train_val_partitions[0] for fname in tup[1]['paths'].tolist()]
 
-        file_names_train = train_val_partitions[0]['path'].tolist()
+        file_names_train = client_set[0]['path'].tolist()
         file_names_train = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_train]
 
 
         # file_names_val = [fname for tup in train_val_partitions[1] for fname in tup[1]['paths'].tolist()]
-        file_names_val = train_val_partitions[1]['path'].tolist()
-        file_names_val = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_val]
+        # file_names_val = client_set[1]['path'].tolist()
+        # file_names_val = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_val]
 
 
         # Initialize DatasetGenerator for training and validation
@@ -320,18 +326,24 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                                         crop_dim=[crop_dim, crop_dim], 
                                         augment=True, seed=seed)
         
-        ds_val_gen = SerializableDatasetGenerator(file_names_val, 
-                                      batch_size=batch_size,crop_dim=[crop_dim, crop_dim], 
-                                      augment=False, seed=seed)
+        
         if first:
-            input_shape, output_shape = ds_train_gen.get_input_shape(), ds_val_gen.get_output_shape()
+            input_shape, output_shape = ds_train_gen.get_input_shape(), ds_train_gen.get_output_shape()
             first=False
         
         
         trainloaders.append(ds_train_gen)
-        valloaders.append(ds_val_gen)
+        # valloaders.append(ds_val_gen)
         
+    # TODO Validation
+    file_names_val = val_indices['path'].tolist()
+    file_names_val = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_val]
 
+    valloader = SerializableDatasetGenerator(file_names_val, 
+                                batch_size=batch_size,
+                                crop_dim=[crop_dim, crop_dim], 
+                                augment=False, 
+                                seed=seed)
 
      # Convert test files to actual data
     file_names_test = test_dataset['path'].tolist()
@@ -343,7 +355,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
                            augment=False, 
                            seed=seed)
         
-    return trainloaders, valloaders, testloader, input_shape, output_shape
+    return trainloaders, valloader, testloader, input_shape, output_shape
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September
 def count_images_in_loader(loader):
