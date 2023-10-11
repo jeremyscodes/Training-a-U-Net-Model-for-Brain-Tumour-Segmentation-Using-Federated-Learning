@@ -1,4 +1,6 @@
 print("Running")
+print("No early stopping")
+print("This is the old runnable(?) version")
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import os
@@ -6,48 +8,10 @@ os.environ["SM_FRAMEWORK"] = "tf.keras"
 import flwr as fl
 import tensorflow as tf
 import psutil
-from flwr.server import Server
 from typing import Dict, List, Tuple
 from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 import numpy as np
-import concurrent.futures
-import timeit
-from logging import DEBUG, INFO
-from flwr.common import (
-    Code,
-    DisconnectRes,
-    EvaluateIns,
-    EvaluateRes,
-    FitIns,
-    FitRes,
-    Parameters,
-    ReconnectIns,
-    Scalar,
-)
-from flwr.common.logger import log
-from flwr.common.typing import GetParametersIns
-from flwr.server.client_manager import ClientManager, SimpleClientManager
-from flwr.server.client_proxy import ClientProxy
-from flwr.server.history import History
-from flwr.server.strategy import FedAvg, Strategy
-from typing import Dict, List, Optional, Tuple, Union
-
-FitResultsAndFailures = Tuple[
-    List[Tuple[ClientProxy, FitRes]],
-    List[Union[Tuple[ClientProxy, FitRes], BaseException]],
-]
-EvaluateResultsAndFailures = Tuple[
-    List[Tuple[ClientProxy, EvaluateRes]],
-    List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
-]
-ReconnectResultsAndFailures = Tuple[
-    List[Tuple[ClientProxy, DisconnectRes]],
-    List[Union[Tuple[ClientProxy, DisconnectRes], BaseException]],
-]
-
-
-from flwr.server import Server as FlowerServer
 
 import sys
 from ang_loader import load_datasets #using new loader (serializable)
@@ -416,11 +380,22 @@ class unet(object):
         print("       --output_dir {} \\".format(os.path.join(self.output_path, "FP32")))
         print("       --data_type FP32\n\n")
 
-
+parser.add_argument(
+    "--num_cpus",
+    type=int,
+    default=1,
+    help="Number of CPUs to assign to a virtual client",
+)
+parser.add_argument(
+    "--num_gpus",
+    type=float,
+    default=0.5,
+    help="Ratio of GPU memory to assign to a virtual client",
+)
 
 #
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self,trainloader, valloader, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
+    def __init__(self,trainloader,valloader, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
     # def __init__(self, num_train_samples, num_val_samples, model_input_shape, model_output_shape)->None:
 
         super().__init__()
@@ -443,9 +418,7 @@ class FlowerClient(fl.client.NumPyClient):
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
         epochs = config['local_epochs']
-        # history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
-        history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader, verbose=2)#, callbacks=model_callbacks)
-
+        history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
         # Return the metrics along with the model weights
         results = {
             'loss': history.history['loss'][0],
@@ -510,7 +483,7 @@ def get_on_fit_config(config: DictConfig):
     return fit_config_fn
 
 # This method can go in server.py    
-def get_evaluate_fn(valset,input_shape,output_shape):
+def get_evaluate_fn(testset,input_shape,output_shape):
 #def get_evaluate_fn(input_shape,output_shape):
 
 
@@ -521,7 +494,7 @@ def get_evaluate_fn(valset,input_shape,output_shape):
     def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar],):
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, dice_coef, soft_dice_coef = model.evaluate(valset, verbose=2)
+        loss, dice_coef, soft_dice_coef = model.evaluate(testset, verbose=2)
         
         return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef}
     return evaluate
@@ -557,127 +530,24 @@ class CustomFedAvg(fl.server.strategy.FedAvg):#FedAdam
         return aggregated_metrics
     #  Each key in the dictionary is a client ID, and the associated value is a list of metrics for that client over the rounds.
 
-class MyServer(FlowerServer):
-    """Flower server."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.prev_val_loss = float('inf')  # For early stopping
-        self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 90  # Patience for early stopping
-
-    def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
-        """Run federated averaging for a number of rounds."""
-        history = History()
-        early_stopping_triggered = False
-
-        # Initialize parameters
-        log(INFO, "Initializing global parameters :)")
-        self.parameters = self._get_initial_parameters(timeout=timeout)
-        log(INFO, "Evaluating initial parameters")
-        res = self.strategy.evaluate(0, parameters=self.parameters)
-        if res is not None:
-            log(
-                INFO,
-                "initial parameters (loss, other metrics): %s, %s",
-                res[0],
-                res[1],
-            )
-            history.add_loss_centralized(server_round=0, loss=res[0])
-            history.add_metrics_centralized(server_round=0, metrics=res[1])
-
-        # Run federated learning for num_rounds
-        log(INFO, "FL starting")
-        start_time = timeit.default_timer()
-
-        for current_round in range(1, num_rounds + 1):
-            # Train model and replace previous global model
-            res_fit = self.fit_round(
-                server_round=current_round,
-                timeout=timeout,
-            )
-            if res_fit is not None:
-                parameters_prime, fit_metrics, _ = res_fit
-                if parameters_prime:
-                    self.parameters = parameters_prime
-                history.add_metrics_distributed_fit(
-                    server_round=current_round, metrics=fit_metrics
-                )
-
-            # Evaluate model using strategy implementation
-            res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
-            if res_cen is not None:
-                loss_cen, metrics_cen = res_cen
-                # NOTE Early stopping logic
-                if loss_cen >= self.prev_val_loss:
-                    self.rounds_without_improvement += 1
-                    print("rounds_without_improvement = ",self.rounds_without_improvement)
-                else:
-                    self.rounds_without_improvement = 0
-                    self.prev_val_loss = loss_cen
-
-                if self.rounds_without_improvement >= self.patience:
-                    print("Early stopping triggered due to no improvement in validation loss for", self.patience, "rounds.")
-                    print("The final validation loss was: ", self.prev_val_loss, " which was achieved on round ", current_round - self.patience)
-                    self._save_model(self.parameters.tensors)
-                    early_stopping_triggered = True
-                    break
-
-                log(
-                    INFO,
-                    "fit progress: (%s, %s, %s, %s)",
-                    current_round,
-                    loss_cen,
-                    metrics_cen,
-                    timeit.default_timer() - start_time,
-                )
-                history.add_loss_centralized(server_round=current_round, loss=loss_cen)
-                history.add_metrics_centralized(
-                    server_round=current_round, metrics=metrics_cen
-                )
-
-            # Evaluate model on a sample of available clients
-            res_fed = self.evaluate_round(server_round=current_round, timeout=timeout)
-            if res_fed is not None:
-                loss_fed, evaluate_metrics_fed, _ = res_fed
-                if loss_fed is not None:
-                    history.add_loss_distributed(
-                        server_round=current_round, loss=loss_fed
-                    )
-                    history.add_metrics_distributed(
-                        server_round=current_round, metrics=evaluate_metrics_fed
-                    )
-
-        if not early_stopping_triggered:
-            self._save_model(self.parameters.tensors)
-            print("Ended without early stopping")
-
-        # Bookkeeping
-        end_time = timeit.default_timer()
-        elapsed = end_time - start_time
-        log(INFO, "FL finished in %s", elapsed)
-        return history
-
-
-    def _save_model(self, weights):
-        model = get_model([128, 128, 1], [128, 128, 1])
-        model.set_weights(weights)
-        model.save('best_globa_model.h5')
-
 def main(cfg: DictConfig) -> None:
     
     enable_tf_gpu_growth()
     # Parse input arguments
+    args = parser.parse_args()
     print("Number of Clients: ",cfg.num_clients)
     print("Number of Clients per round: ",cfg.num_clients_per_round_fit)
     print("Number of Rounds: ",cfg.num_rounds)
     print("Number of Local Epochs: ",cfg.config_fit.local_epochs)
     print("Batch Size: ",cfg.batch_size)
     
+    
+    # Create dataset partitions (needed if your dataset is not pre-partitioned)
+    
     # 1. Load Data
     print("Loading and Partitioning Data")
     trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
-    
+    #working: able to evaluate initial param using ang_loader.py
     # Check that the batches
     print("Data Loaded")
     num_clients=len(trainloaders)
@@ -699,7 +569,7 @@ def main(cfg: DictConfig) -> None:
     num_val_samples_clients = val_sample_dict[cfg.num_clients]
 
     # Create FedAvg strategy
-    MyStrategy = CustomFedAvg(
+    strategy = CustomFedAvg(
         fraction_fit=1,  # Sample 10% of available clients for training
         fraction_evaluate=1,  # Sample 5% of available clients for evaluation
         min_fit_clients=cfg.num_clients_per_round_fit ,  # Never sample less than 10 clients for training
@@ -709,38 +579,35 @@ def main(cfg: DictConfig) -> None:
         ),  # Wait until at least n clients are available
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
-        evaluate_fn=get_evaluate_fn(valloader_global, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
-    ) #NOTE sending in valloader_global to evaluate aggreagated model
+        evaluate_fn=get_evaluate_fn(testloader, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
+    )
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
     # client needs exclusive access to these many resources in order to run
     client_resources = {
-        "num_cpus": cfg.num_cpus,
-        "num_gpus": cfg.num_gpus,
+        "num_cpus": args.num_cpus,
+        "num_gpus": args.num_gpus,
     }
     
     # Start simulation
     history = fl.simulation.start_simulation(
-        client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients, input_shape,output_shape),
+        client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients,input_shape,output_shape),
         num_clients=cfg.num_clients,
-        client_resources=client_resources,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
-        server=MyServer(client_manager=SimpleClientManager(),strategy=MyStrategy),
+        strategy=strategy,
+        client_resources=client_resources,
         actor_kwargs={
             "on_actor_init_fn": enable_tf_gpu_growth  # Enable GPU growth upon actor init
             # does nothing if `num_gpus` in client_resources is 0.0
         }
     ) 
-
-    # Get global model and evaluate using test set
-
     
     print("Got to end of simulation")
     # Initialize a new figure for plotting
-    plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
+    plt.figure(figsize=(15, 5 * len(strategy.client_metrics)))
 
     # Loop over each client's metrics for plotting
-    for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
+    for idx, (client_id, metrics_list) in enumerate(strategy.client_metrics.items()):
         losses = [metrics['loss'] for metrics in metrics_list]
         dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
         soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
@@ -754,7 +621,7 @@ def main(cfg: DictConfig) -> None:
         soft_dice_coefs = [100.0 * data for data in soft_dice_coefs]
 
         # Plotting Loss for the client
-        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 1)
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 1)
         plt.plot(losses, label=f'Client {client_id} Loss')
         plt.title(f'Client {client_id} Loss over Rounds')
         plt.xlabel('Rounds')
@@ -764,7 +631,7 @@ def main(cfg: DictConfig) -> None:
         plt.legend()
 
         # Plotting Dice Coefficient for the client
-        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 2)
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 2)
         plt.plot(dice_coefs, label=f'Client {client_id} Dice Coefficient')
         plt.title(f'Client {client_id} Dice Coefficient over Rounds')
         plt.xlabel('Rounds')
@@ -774,7 +641,7 @@ def main(cfg: DictConfig) -> None:
         plt.legend()
 
         # Plotting Soft Dice Coefficient for the client
-        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 3)
+        plt.subplot(len(strategy.client_metrics), 3, idx * 3 + 3)
         plt.plot(soft_dice_coefs, label=f'Client {client_id} Soft Dice Coefficient')
         plt.title(f'Client {client_id} Soft Dice Coefficient over Rounds')
         plt.xlabel('Rounds')
@@ -809,4 +676,3 @@ if __name__ == "__main__":
     with initialize_config_dir(config_dir=config_path, version_base=None):
         cfg = compose(config_name="base")
         main(cfg)
-

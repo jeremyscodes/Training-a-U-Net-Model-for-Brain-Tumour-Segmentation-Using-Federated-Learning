@@ -5,6 +5,8 @@ num_clients: 2
 batch_size: 21
 num_clients_per_round_fit: 2
 num_clients_per_round_eval: 2
+num_cpus: 1
+num_gpus: 0.5
 
 config_fit:
   lr: 0.0001
