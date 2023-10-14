@@ -273,14 +273,15 @@ def split_into_n_partitions(data, n):
     return partitions
 
 
-def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.05):
+def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
     crop_dim=128  # Original resolution (240)
     seed=816
-    train_test_split_val=0.85
 
     #IID Partitioning
 
     train_data = pd.read_csv('BRaTSdataset_filenames.csv')
+    #print numer of rows in train_data
+    print("Number of rows in train_data:",len(train_data)) #= 484 rows
     # Splitting the data into training and testing sets using indices
     train_indices, test_indices = train_test_split(train_data.index, test_size=0.2, random_state=42)
     #split train_indices into train and validation
@@ -288,7 +289,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.05)
     # Train: 60%, Val: 20%, Test: 20%
 
     train_dataset = train_data.iloc[train_indices]
-    val_indices = train_data.iloc[val_indices]
+    val_dataset = train_data.iloc[val_indices]
     test_dataset = train_data.iloc[test_indices]
 
     client_sets = split_into_n_partitions(train_dataset,num_partitions)
@@ -339,7 +340,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.05)
         valloaders.append(ds_val_gen)
         
     # TODO Validation
-    file_names_global_val = val_indices['path'].tolist()
+    file_names_global_val = val_dataset['path'].tolist()
     file_names_global_val = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_global_val]
 
     valloader_global = SerializableDatasetGenerator(file_names_global_val, 
@@ -357,7 +358,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.05)
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-        
+        #  60%                       20%               20%
     return trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape
 #Finished Fixing on Wednesday 23 August 
 # Modified for BRaTS dataset 16 September

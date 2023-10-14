@@ -1,6 +1,5 @@
 print("Running")
 from collections import defaultdict
-import string
 import matplotlib.pyplot as plt
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
@@ -9,7 +8,7 @@ import tensorflow as tf
 import psutil
 from flwr.server import Server
 from typing import Dict, List, Tuple
-from flwr.common import Metrics, parameters_to_ndarrays
+from flwr.common import Metrics
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 import numpy as np
 import concurrent.futures
@@ -52,7 +51,7 @@ from flwr.server import Server as FlowerServer
 
 import sys
 from ang_loader import load_datasets #using new loader (serializable)
-from copy import deepcopy
+
 
 
 from hydra.core.config_store import ConfigStore
@@ -354,6 +353,30 @@ class unet(object):
 
         return model
 
+    def evaluate_model(self, model_filename, ds_test):
+        # NOTE Should not be used
+        """
+        Evaluate the best model on the validation dataset
+        """
+        print("In model.py evaluate_model()")
+        # print("The value of model_filename is"+str(model_filename))
+        # if not os.path.exists(model_filename):
+        #     raise ValueError(f"Model file does not exist at {model_filename}")
+        #print(f"Current working directory: {os.getcwd()}")
+
+
+
+        model = K.models.load_model(
+            model_filename, custom_objects=self.custom_objects)
+
+        print("Evaluating model on test dataset. Please wait...")
+        metrics = model.evaluate(
+            ds_test,
+            verbose=2)
+
+        for idx, metric in enumerate(metrics):
+            print("Test dataset {} = {:.4f}".format(
+                model.metrics_names[idx], metric))
 
     def create_model(self, imgs_shape, msks_shape,
                      dropout=0.2,
@@ -420,6 +443,7 @@ class FlowerClient(fl.client.NumPyClient):
         # Copy parameters sent by the server into client's local model
         self.model.set_weights(parameters) #9:40 in video
         epochs = config['local_epochs']
+        # history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader,  verbose=2)#, callbacks=model_callbacks)
         history = self.model.fit(self.trainloader, epochs=epochs, validation_data=self.valloader, verbose=2)#, callbacks=model_callbacks)
 
         # Return the metrics along with the model weights
@@ -494,11 +518,10 @@ def get_evaluate_fn(valset,input_shape,output_shape):
 
 
     # The `evaluate` function will be called after every round by the strategy
-    def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar]):
-        print("evaluate function called after every round by strategy")
+    def evaluate(server_round: int, parameters: fl.common.NDArrays, config: Dict[str, fl.common.Scalar],):
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, dice_coef, soft_dice_coef = model.evaluate(valset, verbose=0)
+        loss, dice_coef, soft_dice_coef = model.evaluate(valset, verbose=2)
         
         return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef}
     return evaluate
@@ -541,8 +564,7 @@ class MyServer(FlowerServer):
         super().__init__(*args, **kwargs)
         self.prev_val_loss = float('inf')  # For early stopping
         self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 40  # Patience for early stopping
-        self.global_parameters = None
+        self.patience = 90  # Patience for early stopping
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
         """Run federated averaging for a number of rounds."""
@@ -583,27 +605,21 @@ class MyServer(FlowerServer):
                 )
 
             # Evaluate model using strategy implementation
-            print("in MyServer, about to evaluate")
             res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
             if res_cen is not None:
                 loss_cen, metrics_cen = res_cen
-                print("Aggregated model: loss_centralized = ",loss_cen)
                 # NOTE Early stopping logic
                 if loss_cen >= self.prev_val_loss:
-                    # model got worse
                     self.rounds_without_improvement += 1
                     print("rounds_without_improvement = ",self.rounds_without_improvement)
                 else:
-                    # model got better
                     self.rounds_without_improvement = 0
                     self.prev_val_loss = loss_cen
 
                 if self.rounds_without_improvement >= self.patience:
                     print("Early stopping triggered due to no improvement in validation loss for", self.patience, "rounds.")
                     print("The final validation loss was: ", self.prev_val_loss, " which was achieved on round ", current_round - self.patience)
-                    params = parameters_to_ndarrays(self.parameters)
-                    self._save_model(params)
-                    self.global_parameters = deepcopy(params)
+                    self._save_model(self.parameters.tensors)
                     early_stopping_triggered = True
                     break
 
@@ -633,9 +649,7 @@ class MyServer(FlowerServer):
                     )
 
         if not early_stopping_triggered:
-            params = parameters_to_ndarrays(self.parameters)
-            self._save_model(params)
-            self.global_parameters = deepcopy(params)
+            self._save_model(self.parameters.tensors)
             print("Ended without early stopping")
 
         # Bookkeeping
@@ -645,20 +659,12 @@ class MyServer(FlowerServer):
         return history
 
 
-    def _save_model(self,weights):
+    def _save_model(self, weights):
         model = get_model([128, 128, 1], [128, 128, 1])
         model.set_weights(weights)
-        model.save('best_global_model.keras')
-        print("Saved model to disk.")
+        model.save('best_globa_model.h5')
 
 def main(cfg: DictConfig) -> None:
-
-    #generate random letter
-    import random
-
-    random_letter = chr(random.randint(65, 90))  # generate a random uppercase letter
-    print("This run is letter ",random_letter)
-    
     
     enable_tf_gpu_growth()
     # Parse input arguments
@@ -671,9 +677,6 @@ def main(cfg: DictConfig) -> None:
     # 1. Load Data
     print("Loading and Partitioning Data")
     trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(cfg.num_clients, cfg.batch_size)
-    print("Valloader len: ",len(valloader_global))
-    print("Testloader len: ",len(testloader))
-
     
     # Check that the batches
     print("Data Loaded")
@@ -698,8 +701,7 @@ def main(cfg: DictConfig) -> None:
     # Create FedAvg strategy
     MyStrategy = CustomFedAvg(
         fraction_fit=1,  # Sample 10% of available clients for training
-        fraction_evaluate=1,  # Sample 5% of available clients for evaluation
-        #setting to 0 gave shape compatibility error
+        fraction_evaluate=0,  # Sample 5% of available clients for evaluation
         min_fit_clients=cfg.num_clients_per_round_fit ,  # Never sample less than 10 clients for training
         min_evaluate_clients=cfg.num_clients_per_round_eval ,  # Never sample less than 5 clients for evaluation
         min_available_clients=int(
@@ -707,9 +709,8 @@ def main(cfg: DictConfig) -> None:
         ),  # Wait until at least n clients are available
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
-        evaluate_fn=get_evaluate_fn(valloader_global, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on global val set
+        evaluate_fn=get_evaluate_fn(valloader_global, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on test set
     ) #NOTE sending in valloader_global to evaluate aggreagated model
-    # get_evaluate_fn gives the server an emaulation function. The server then calls this function after each round to evaluate the global model on the global validation set
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
     # client needs exclusive access to these many resources in order to run
@@ -730,137 +731,82 @@ def main(cfg: DictConfig) -> None:
             # does nothing if `num_gpus` in client_resources is 0.0
         }
     ) 
-    
-
-    
-
-    print("Got to end of simulation")
-    # Initialize a new figure for plotting
-    try:
-        plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
-
-        # Loop over each client's metrics for plotting
-        for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
-            losses = [metrics['loss'] for metrics in metrics_list]
-            dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
-            soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
-            # save as npy file
-            np.save(f'{random_letter}_client_{client_id}_losses.npy', losses)
-            np.save(f'{random_letter}_client_{client_id}_dice_coefs.npy', dice_coefs)
-            np.save(f'{random_letter}_client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
-
-            losses = [100.0 * data for data in losses]
-            dice_coefs = [100.0 * data for data in dice_coefs]
-            soft_dice_coefs = [100.0 * data for data in soft_dice_coefs]
-
-            # Plotting Loss for the client
-            plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 1)
-            plt.plot(losses, label=f'Client {client_id} Loss')
-            plt.title(f'Client {client_id} Loss over Rounds')
-            plt.xlabel('Rounds')
-            plt.ylabel('Loss')
-            plt.xticks(range(0,len(losses)+10,10))
-            # plt.ylim(0, 100)  # set y-axis range to 0-100
-            plt.legend()
-
-            # Plotting Dice Coefficient for the client
-            plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 2)
-            plt.plot(dice_coefs, label=f'Client {client_id} Dice Coefficient')
-            plt.title(f'Client {client_id} Dice Coefficient over Rounds')
-            plt.xlabel('Rounds')
-            plt.ylabel('Dice Coefficient (%)')
-            plt.xticks(range(0,len(dice_coefs)+10,10))
-            # plt.ylim(0, 100)  # set y-axis range to 0-100
-            plt.legend()
-
-            # Plotting Soft Dice Coefficient for the client
-            plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 3)
-            plt.plot(soft_dice_coefs, label=f'Client {client_id} Soft Dice Coefficient')
-            plt.title(f'Client {client_id} Soft Dice Coefficient over Rounds')
-            plt.xlabel('Rounds')
-            plt.ylabel('Soft Dice Coefficient (%)')
-            plt.xticks(range(0,len(soft_dice_coefs)+10,10))
-            # plt.ylim(0, 100)  # set y-axis range to 0-100
-            plt.legend()
-
-            # Adjust layout and display the plots
-            plt.tight_layout()
-            plt.savefig(f'{random_letter}_{cfg.num_clients}_clients_plots_FedAvg_client_{client_id}.png')
-            plt.figure()
-    except:
-        print("Failed to plot client metrics")
-
-    #try catch the below plotting code  
-    try:
-        print(f"{history.metrics_centralized = }")
-
-        #save data for this plot with np.save
-       
-
-        global_dice_centralised = history.metrics_centralized["dice_coef"]
-        round = [data[0] for data in global_dice_centralised]
-        dice = [100.0 * data[1] for data in global_dice_centralised]
-        plt.plot(round, dice)
-        plt.grid()
-        plt.ylabel("Dice Coefficient (%)")
-        plt.xlabel("Round")
-        plt.title(f"BRATS - IID - 2 clients with {cfg.num_clients} clients per round")
-        # save the plot
-        plt.savefig(f'{random_letter}_global_model_{cfg.num_clients}_clients_FedAvg.png')
-        plt.figure()
-        np.save(f'{random_letter}_global_model_DC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized)
-    except: 
-        print("Failed to plot global model dice coefficient and save raw data")
-
-    #plot history.losses_centralized
-    try:
-        global_loss_centralised = history.losses_centralized
-        round = [data[0] for data in global_loss_centralised]
-        loss = [data[1] for data in global_loss_centralised]
-        plt.plot(round, loss)
-        plt.grid()
-        plt.ylabel("Loss (%)")
-        plt.xlabel("Round")
-        plt.title(f"BRATS - IID - 2 clients with {cfg.num_clients} clients per round")
-        # save the plot
-        plt.savefig(f'{random_letter}_global_model_loss_{cfg.num_clients}_clients_FedAvg.png')
-        plt.figure()
-        # save the raw data
-        np.save(f'{random_letter}_global_model_loss_{cfg.num_clients}_clients_FedAvg.npy', history.losses_centralized)
-    except:
-        print("Failed to plot global model loss")
 
     # Get global model and evaluate using test set
-    # only load model if file exists
-    try:
-        if os.path.isfile('best_global_model.keras'):
-            print("Loading model from file")
-            model = get_model([128, 128, 1], [128, 128, 1])
-            model.load_weights('best_global_model.h5')
-            loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=1)
-            print()
-            print("-----TEST RESULTS-----")
-            print("Test Loss: ",loss)
-            print("Test Dice Coefficient: ",dice_coef)
-            print("Test Soft Dice Coefficient: ",soft_dice_coef)
-    except:
-        print("Failed to load model from file and evaluate")
-    #try catch the below block of code
+    model = get_model([128, 128, 1], [128, 128, 1])
+    model.load_weights('best_global_model.h5')
+    loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=2)
+    print("Test Loss: ",loss)
+    print("Test Dice Coefficient: ",dice_coef)
+    print("Test Soft Dice Coefficient: ",soft_dice_coef)
     
-    #do the same but with stategy.global_parameters
-    try:
-        print("Loading model from global_parameters")
-        model = get_model([128, 128, 1], [128, 128, 1])
-        model.set_weights(MyStrategy.global_parameters)
-        loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=2)
-        print()
-        print("-----TEST RESULTS-----")
-        print("Test Loss: ",loss)
-        print("Test Dice Coefficient: ",dice_coef)
-        print("Test Soft Dice Coefficient: ",soft_dice_coef)
-        print("BOTH TESTS SHOULD BE THE SAME")
-    except:
-        print("Failed to load model from global_parameters")
+    print("Got to end of simulation")
+    # Initialize a new figure for plotting
+    plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
+
+    # Loop over each client's metrics for plotting
+    for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
+        losses = [metrics['loss'] for metrics in metrics_list]
+        dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
+        soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
+        # save as npy file
+        np.save(f'client_{client_id}_losses.npy', losses)
+        np.save(f'client_{client_id}_dice_coefs.npy', dice_coefs)
+        np.save(f'client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
+
+        losses = [100.0 * data for data in losses]
+        dice_coefs = [100.0 * data for data in dice_coefs]
+        soft_dice_coefs = [100.0 * data for data in soft_dice_coefs]
+
+        # Plotting Loss for the client
+        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 1)
+        plt.plot(losses, label=f'Client {client_id} Loss')
+        plt.title(f'Client {client_id} Loss over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Loss')
+        plt.xticks(range(0,len(losses)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+        # Plotting Dice Coefficient for the client
+        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 2)
+        plt.plot(dice_coefs, label=f'Client {client_id} Dice Coefficient')
+        plt.title(f'Client {client_id} Dice Coefficient over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Dice Coefficient (%)')
+        plt.xticks(range(0,len(dice_coefs)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+        # Plotting Soft Dice Coefficient for the client
+        plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 3)
+        plt.plot(soft_dice_coefs, label=f'Client {client_id} Soft Dice Coefficient')
+        plt.title(f'Client {client_id} Soft Dice Coefficient over Rounds')
+        plt.xlabel('Rounds')
+        plt.ylabel('Soft Dice Coefficient (%)')
+        plt.xticks(range(0,len(soft_dice_coefs)+10),10)
+        # plt.ylim(0, 100)  # set y-axis range to 0-100
+        plt.legend()
+
+    # Adjust layout and display the plots
+    plt.tight_layout()
+    plt.savefig('client_plots.png')
+    plt.figure()
+
+
+    print(f"{history.metrics_centralized = }")
+
+    global_dice_centralised = history.metrics_centralized["dice_coef"]
+    round = [data[0] for data in global_dice_centralised]
+    dice = [100.0 * data[1] for data in global_dice_centralised]
+    plt.plot(round, dice)
+    plt.grid()
+    plt.ylabel("Dice Coefficient (%)")
+    plt.xlabel("Round")
+    plt.title("BRATS - IID - 2 clients with 10 clients per round")
+    # save the plot
+    plt.savefig('global_model.png')
+    plt.figure()
         
     
 if __name__ == "__main__":
