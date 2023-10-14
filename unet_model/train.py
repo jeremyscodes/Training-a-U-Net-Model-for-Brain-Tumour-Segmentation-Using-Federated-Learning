@@ -70,6 +70,8 @@ def test_intel_tensorflow():
 
 import matplotlib.pyplot as plt
 
+import numpy as np
+
 def save_training_plots(history, output_path):
     # Define a function to save plots
     def save_plot(values, val_values, ylabel, title, filename):
@@ -80,21 +82,61 @@ def save_training_plots(history, output_path):
         plt.ylabel(ylabel)
         plt.xlabel('Epoch')
         plt.legend(['Train', 'Validation'], loc='upper left')
-        plt.savefig(filename)
-        plt.close()
+        try:
+            plt.savefig(filename)
+        except Exception as e:
+            print(f"Error saving plot {filename}: {e}")
+        finally:
+            plt.close()
     
     # Save Loss Plot
-    save_plot(history.history['loss'], history.history['val_loss'], 'Loss', 'Model Loss', 
-              os.path.join(output_path, 'loss_plot.png'))
+    try:
+        np.save(os.path.join(output_path, 'loss.npy'), np.column_stack((history.history['loss'], history.history['val_loss'])))
+        save_plot(history.history['loss'], history.history['val_loss'], 'Loss', 'Model Loss', 
+                  os.path.join(output_path, 'loss_plot.png'))
+    except Exception as e:
+        print(f"Error saving loss plot: {e}")
     
     # Save Dice Coefficient Plot
-    save_plot(history.history['dice_coef'], history.history['val_dice_coef'], 'Dice Coefficient', 
-              'Model Dice Coefficient', os.path.join(output_path, 'dice_coef_plot.png'))
+    try:
+        np.save(os.path.join(output_path, 'dice_coef.npy'), np.column_stack((history.history['dice_coef'], history.history['val_dice_coef'])))
+        save_plot(history.history['dice_coef'], history.history['val_dice_coef'], 'Dice Coefficient', 
+                  'Model Dice Coefficient', os.path.join(output_path, 'dice_coef_plot.png'))
+    except Exception as e:
+        print(f"Error saving dice coefficient plot: {e}")
     
     # Save Soft Dice Coefficient Plot
-    save_plot(history.history['soft_dice_coef'], history.history['val_soft_dice_coef'], 
-              'Soft Dice Coefficient', 'Model Soft Dice Coefficient', 
-              os.path.join(output_path, 'soft_dice_coef_plot.png'))
+    try:
+        np.save(os.path.join(output_path, 'soft_dice_coef.npy'), np.column_stack((history.history['soft_dice_coef'], history.history['val_soft_dice_coef'])))
+        save_plot(history.history['soft_dice_coef'], history.history['val_soft_dice_coef'], 
+                  'Soft Dice Coefficient', 'Model Soft Dice Coefficient', 
+                  os.path.join(output_path, 'soft_dice_coef_plot.png'))
+    except Exception as e:
+        print(f"Error saving soft dice coefficient plot: {e}")
+    
+     # Save Precision Plot
+    try:
+        np.save(os.path.join(output_path, 'precision.npy'), np.column_stack((history.history['precision'], history.history['val_precision'])))
+        save_plot(history.history['precision'], history.history['val_precision'], 'Precision', 
+                  'Model Precision', os.path.join(output_path, 'precision_plot.png'))
+    except Exception as e:
+        print(f"Error saving precision plot: {e}")
+
+    # Save Accuracy Plot
+    try:
+        np.save(os.path.join(output_path, 'accuracy.npy'), np.column_stack((history.history['accuracy'], history.history['val_accuracy'])))
+        save_plot(history.history['accuracy'], history.history['val_accuracy'], 'Accuracy', 
+                  'Model Accuracy', os.path.join(output_path, 'accuracy_plot.png'))
+    except Exception as e:
+        print(f"Error saving accuracy plot: {e}")
+
+    # Save Specificity Plot
+    try:
+        np.save(os.path.join(output_path, 'specificity.npy'), np.column_stack((history.history['specificity'], history.history['val_specificity'])))
+        save_plot(history.history['specificity'], history.history['val_specificity'], 'Specificity', 
+                  'Model Specificity', os.path.join(output_path, 'specificity_plot.png'))
+    except Exception as e:
+        print(f"Error saving specificity plot: {e}")
 
 # You can now call this function to save the plots:
 # save_training_plots(history, 'path_to_save_plots')

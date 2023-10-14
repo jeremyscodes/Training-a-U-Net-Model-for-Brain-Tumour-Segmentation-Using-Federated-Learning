@@ -737,10 +737,11 @@ def main(cfg: DictConfig) -> None:
     print("Got to end of simulation")
     # Initialize a new figure for plotting
     try:
-        plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
+        
 
         # Loop over each client's metrics for plotting
         for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
+            plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
             losses = [metrics['loss'] for metrics in metrics_list]
             dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
             soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]

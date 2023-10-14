@@ -29,6 +29,7 @@ import time
 import shutil
 
 import tensorflow as tf  # conda install -c anaconda tensorflow
+from tensorflow.keras.metrics import Precision, BinaryAccuracy
 
 from tensorflow import keras as K
 
@@ -76,7 +77,8 @@ class unet(object):
         self.output_path = output_path
         self.inference_filename = inference_filename
 
-        self.metrics = [self.dice_coef, self.soft_dice_coef]
+        # self.metrics = [self.dice_coef, self.soft_dice_coef]
+        self.metrics = [self.dice_coef, self.soft_dice_coef, self.precision, self.accuracy, self.specificity]
 
         self.loss = self.dice_coef_loss
         #self.loss = self.combined_dice_ce_loss
@@ -87,7 +89,10 @@ class unet(object):
             "combined_dice_ce_loss": self.combined_dice_ce_loss,
             "dice_coef_loss": self.dice_coef_loss,
             "dice_coef": self.dice_coef,
-            "soft_dice_coef": self.soft_dice_coef}
+            "soft_dice_coef": self.soft_dice_coef,
+            "precision": self.precision,
+            "accuracy": self.accuracy,
+            "specificity": self.specificity}
 
         self.blocktime = blocktime
         self.num_threads = num_threads
@@ -146,6 +151,52 @@ class unet(object):
         dice_loss = -tf.math.log(2.*numerator) + tf.math.log(denominator)
 
         return dice_loss
+    
+    #My Metrics----------------------------
+    def specificity(self, y_true, y_pred):
+        """
+        Compute specificity.
+        """
+        # Threshold predictions
+        y_pred = K.backend.round(y_pred)
+        
+        # Count true negatives
+        tn = K.backend.sum(K.backend.round(K.backend.clip((1-y_true) * (1-y_pred), 0, 1)))
+        
+        # Count false positives
+        fp = K.backend.sum(K.backend.round(K.backend.clip((1-y_true) * y_pred, 0, 1)))
+        
+        # Compute specificity
+        specificity = tn / (tn + fp + K.backend.epsilon())
+        return specificity
+
+    # Redefining precision and accuracy for consistency
+    def precision(self, y_true, y_pred):
+        """
+        Compute precision.
+        """
+        # Threshold predictions
+        y_pred = K.backend.round(y_pred)
+        
+        # Count true positives
+        tp = K.backend.sum(K.backend.round(K.backend.clip(y_true * y_pred, 0, 1)))
+        
+        # Count predicted positives
+        pp = K.backend.sum(K.backend.round(K.backend.clip(y_pred, 0, 1)))
+        
+        # Compute precision
+        precision = tp / (pp + K.backend.epsilon())
+        return precision
+
+    def accuracy(self, y_true, y_pred):
+        """
+        Compute binary accuracy.
+        """
+        y_pred_rounded = K.backend.round(y_pred)
+        correct_predictions = K.backend.equal(y_true, y_pred_rounded)
+        return K.backend.mean(correct_predictions, axis=-1)
+
+    # end of MY Metrics----------------------------------------------------------------------
 
     def combined_dice_ce_loss(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """
