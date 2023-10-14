@@ -68,6 +68,41 @@ def test_intel_tensorflow():
 
     print("We are using Tensorflow version {}".format(tf.__version__))
 
+import matplotlib.pyplot as plt
+
+def save_training_plots(history, output_path):
+    # Define a function to save plots
+    def save_plot(values, val_values, ylabel, title, filename):
+        plt.figure(figsize=(6, 4))
+        plt.plot(values)
+        plt.plot(val_values)
+        plt.title(title)
+        plt.ylabel(ylabel)
+        plt.xlabel('Epoch')
+        plt.legend(['Train', 'Validation'], loc='upper left')
+        plt.savefig(filename)
+        plt.close()
+    
+    # Save Loss Plot
+    save_plot(history.history['loss'], history.history['val_loss'], 'Loss', 'Model Loss', 
+              os.path.join(output_path, 'loss_plot.png'))
+    
+    # Save Dice Coefficient Plot
+    save_plot(history.history['dice_coef'], history.history['val_dice_coef'], 'Dice Coefficient', 
+              'Model Dice Coefficient', os.path.join(output_path, 'dice_coef_plot.png'))
+    
+    # Save Soft Dice Coefficient Plot
+    save_plot(history.history['soft_dice_coef'], history.history['val_soft_dice_coef'], 
+              'Soft Dice Coefficient', 'Model Soft Dice Coefficient', 
+              os.path.join(output_path, 'soft_dice_coef_plot.png'))
+
+# You can now call this function to save the plots:
+# save_training_plots(history, 'path_to_save_plots')
+
+
+# This function can be used to plot the training history like this:
+# plot_training_history(history)
+
 
 if __name__ == "__main__":
 
@@ -134,11 +169,15 @@ if __name__ == "__main__":
     print("Fitting model with training data ...")
     print("-" * 30)
 
-    model.fit(ds_train,
+    history = model.fit(ds_train,
               epochs=args.epochs,
               validation_data=ds_validation,
               verbose=2,
               callbacks=model_callbacks)
+    
+    # plot the training loss and metrics
+    save_training_plots(history, './')
+
 
     """
     Step 4: Evaluate the best model
@@ -164,3 +203,5 @@ if __name__ == "__main__":
             datetime.datetime.now() -
             START_TIME))
     print("Stopped script on {}".format(datetime.datetime.now()))
+
+    

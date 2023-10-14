@@ -174,8 +174,6 @@ class unet(object):
 
         num_chan_in = imgs_shape[self.concat_axis]
         num_chan_out = msks_shape[self.concat_axis]
-        print("num_chan_in = ",num_chan_in)
-        print("num_chan_out = ",num_chan_out)
         
 
         # You can make the network work on variable input height and width
