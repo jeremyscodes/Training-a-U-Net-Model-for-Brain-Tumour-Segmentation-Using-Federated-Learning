@@ -3,6 +3,8 @@ import numpy as np
 import os
 import json
 import settings
+import csv
+
     
 def get_decathlon_filelist(data_path, seed=816, split=0.85):
     """
@@ -62,6 +64,12 @@ def get_decathlon_filelist(data_path, seed=816, split=0.85):
     testFiles = []
     for idx in testList:
         testFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
+
+    # Save test file paths to CSV
+    with open("test_file_paths.csv", "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for path in testFiles:
+            writer.writerow([path])
 
     print("Number of training files   = {}".format(len(trainList)))
     print("Number of validation files = {}".format(len(validateList)))
@@ -257,22 +265,14 @@ class DatasetGenerator(Sequence):
 
             if self.augment:
                 img_batch, label_batch = self.augment_data(img_batch, label_batch)
-            print("before expand")
-            print("img_batch shape:       ",img_batch.shape)
-            print("label_batch shape:     ",label_batch.shape)
 
             if len(np.shape(img_batch)) == 3:
                 img_batch = np.expand_dims(img_batch, axis=-1)
             if len(np.shape(label_batch)) == 3:
                 label_batch = np.expand_dims(label_batch, axis=-1)
-            print("after expand")
-            print("img_batch shape:        ",img_batch.shape)
-            print("label_batch shape:      ",label_batch.shape)
 
             ret1 = np.transpose(img_batch, [2,0,1,3]).astype(np.float32)
             ret2 = np.transpose(label_batch, [2,0,1,3]).astype(np.float32)
-            print("Transposed img_batch:   ",ret1.shape)
-            print("Transposed label_batch: ",ret2.shape)
 
             yield np.transpose(img_batch, [2,0,1,3]).astype(np.float32), np.transpose(label_batch, [2,0,1,3]).astype(np.float32)
 

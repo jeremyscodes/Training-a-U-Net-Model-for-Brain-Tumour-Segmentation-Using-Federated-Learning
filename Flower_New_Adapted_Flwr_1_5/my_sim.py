@@ -837,7 +837,7 @@ def main(cfg: DictConfig) -> None:
         if os.path.isfile('best_global_model.keras'):
             print("Loading model from file")
             model = get_model([128, 128, 1], [128, 128, 1])
-            model.load_weights('best_global_model.h5')
+            model.load_weights('best_global_model.keras')
             loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=1)
             print()
             print("-----TEST RESULTS-----")
