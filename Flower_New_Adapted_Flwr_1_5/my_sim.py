@@ -125,7 +125,7 @@ class unet(object):
         self.output_path = output_path
         self.inference_filename = inference_filename
 
-        self.metrics = [self.dice_coef, self.soft_dice_coef]
+        self.metrics = [self.dice_coef, self.soft_dice_coef, self.precision, self.accuracy, self.specificity]
 
         self.loss = self.dice_coef_loss
         # self.loss = self.combined_dice_ce_loss
@@ -136,7 +136,10 @@ class unet(object):
             "combined_dice_ce_loss": self.combined_dice_ce_loss,
             "dice_coef_loss": self.dice_coef_loss,
             "dice_coef": self.dice_coef,
-            "soft_dice_coef": self.soft_dice_coef}
+            "soft_dice_coef": self.soft_dice_coef,
+            "precision": self.precision,
+            "accuracy": self.accuracy,
+            "specificity": self.specificity}
 
         self.blocktime = blocktime
         self.num_threads = num_threads
@@ -176,6 +179,53 @@ class unet(object):
         coef = numerator / denominator
 
         return tf.reduce_mean(coef)
+    
+    #My Metrics----------------------------
+    def specificity(self, y_true, y_pred):
+        """
+        Compute specificity.
+        """
+        # Threshold predictions
+        y_pred = K.backend.round(y_pred)
+        
+        # Count true negatives
+        tn = K.backend.sum(K.backend.round(K.backend.clip((1-y_true) * (1-y_pred), 0, 1)))
+        
+        # Count false positives
+        fp = K.backend.sum(K.backend.round(K.backend.clip((1-y_true) * y_pred, 0, 1)))
+        
+        # Compute specificity
+        specificity = tn / (tn + fp + K.backend.epsilon())
+        return specificity
+
+    # Redefining precision and accuracy for consistency
+    def precision(self, y_true, y_pred):
+        """
+        Compute precision.
+        """
+        # Threshold predictions
+        y_pred = K.backend.round(y_pred)
+        
+        # Count true positives
+        tp = K.backend.sum(K.backend.round(K.backend.clip(y_true * y_pred, 0, 1)))
+        
+        # Count predicted positives
+        pp = K.backend.sum(K.backend.round(K.backend.clip(y_pred, 0, 1)))
+        
+        # Compute precision
+        precision = tp / (pp + K.backend.epsilon())
+        return precision
+
+    def accuracy(self, y_true, y_pred):
+        """
+        Compute binary accuracy.
+        """
+        y_pred_rounded = K.backend.round(y_pred)
+        correct_predictions = K.backend.equal(y_true, y_pred_rounded)
+        return K.backend.mean(correct_predictions, axis=-1)
+
+    # end of MY Metrics----------------------------------------------------------------------
+
 
     def dice_coef_loss(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """
@@ -541,7 +591,7 @@ class MyServer(FlowerServer):
         super().__init__(*args, **kwargs)
         self.prev_val_loss = float('inf')  # For early stopping
         self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 40  # Patience for early stopping
+        self.patience = 50  # Patience for early stopping
         self.global_parameters = None
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
@@ -648,7 +698,7 @@ class MyServer(FlowerServer):
     def _save_model(self,weights):
         model = get_model([128, 128, 1], [128, 128, 1])
         model.set_weights(weights)
-        model.save('best_global_model.keras')
+        model.save(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
         print("Saved model to disk.")
 
 def main(cfg: DictConfig) -> None:
@@ -708,7 +758,7 @@ def main(cfg: DictConfig) -> None:
         on_fit_config_fn=get_on_fit_config(cfg.config_fit),
         evaluate_metrics_aggregation_fn=weighted_average,  # aggregates federated metrics
         evaluate_fn=get_evaluate_fn(valloader_global, input_shape, output_shape),  # global evaluation function # evaluate aggregated model on global val set
-    ) #NOTE sending in valloader_global to evaluate aggreagated model
+    ) # sending in valloader_global to evaluate aggreagated model
     # get_evaluate_fn gives the server an emaulation function. The server then calls this function after each round to evaluate the global model on the global validation set
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
@@ -730,15 +780,10 @@ def main(cfg: DictConfig) -> None:
             # does nothing if `num_gpus` in client_resources is 0.0
         }
     ) 
-    
-
-    
-
     print("Got to end of simulation")
     # Initialize a new figure for plotting
     try:
         
-
         # Loop over each client's metrics for plotting
         for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
             plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
@@ -746,9 +791,9 @@ def main(cfg: DictConfig) -> None:
             dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
             soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
             # save as npy file
-            np.save(f'{random_letter}_client_{client_id}_losses.npy', losses)
-            np.save(f'{random_letter}_client_{client_id}_dice_coefs.npy', dice_coefs)
-            np.save(f'{random_letter}_client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
+            np.save(f'{random_letter}_FLFedAvg_{cfg.num_clients}_client_{client_id}_losses.npy', losses)
+            np.save(f'{random_letter}_FLFedAvg_{cfg.num_clients}_client_{client_id}_dice_coefs.npy', dice_coefs)
+            np.save(f'{random_letter}_FLFedAvg_{cfg.num_clients}_client_{client_id}_soft_dice_coefs.npy', soft_dice_coefs)
 
             losses = [100.0 * data for data in losses]
             dice_coefs = [100.0 * data for data in dice_coefs]
@@ -786,7 +831,7 @@ def main(cfg: DictConfig) -> None:
 
             # Adjust layout and display the plots
             plt.tight_layout()
-            plt.savefig(f'{random_letter}_{cfg.num_clients}_clients_plots_FedAvg_client_{client_id}.png')
+            plt.savefig(f'{random_letter}_FLFedAvg_{cfg.num_clients}_clients_plots_FedAvg_client_{client_id}.png')
             plt.figure()
     except:
         print("Failed to plot client metrics")
@@ -796,8 +841,6 @@ def main(cfg: DictConfig) -> None:
         print(f"{history.metrics_centralized = }")
 
         #save data for this plot with np.save
-       
-
         global_dice_centralised = history.metrics_centralized["dice_coef"]
         round = [data[0] for data in global_dice_centralised]
         dice = [100.0 * data[1] for data in global_dice_centralised]
@@ -805,13 +848,32 @@ def main(cfg: DictConfig) -> None:
         plt.grid()
         plt.ylabel("Dice Coefficient (%)")
         plt.xlabel("Round")
-        plt.title(f"BRATS - IID - 2 clients with {cfg.num_clients} clients per round")
+        plt.title(f"Aggregated model's Dice Coefficient with {cfg.num_clients} clients")
         # save the plot
-        plt.savefig(f'{random_letter}_global_model_{cfg.num_clients}_clients_FedAvg.png')
+        plt.savefig(f'{random_letter}_global_model_DC_{cfg.num_clients}_clients_FedAvg.png')
         plt.figure()
-        np.save(f'{random_letter}_global_model_DC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized)
+        np.save(f'{random_letter}_global_model_DC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["dice_coef"])
     except: 
         print("Failed to plot global model dice coefficient and save raw data")
+    
+    try:
+        print(f"{history.metrics_centralized = }")
+
+        #save data for this plot with np.save
+        global_dice_centralised = history.metrics_centralized["soft_dice_coef"]
+        round = [data[0] for data in global_dice_centralised]
+        dice = [100.0 * data[1] for data in global_dice_centralised]
+        plt.plot(round, dice)
+        plt.grid()
+        plt.ylabel("Soft Dice Coefficient (%)")
+        plt.xlabel("Round")
+        plt.title(f"Aggregated model's Soft Dice Coefficient with {cfg.num_clients} clients")
+        # save the plot
+        plt.savefig(f'{random_letter}_global_model_soft_DC_{cfg.num_clients}_clients_FedAvg.png')
+        plt.figure()
+        np.save(f'{random_letter}_global_model_softDC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["soft_dice_coef"])
+    except: 
+        print("Failed to plot global model soft dice coefficient and save raw data")
 
     #plot history.losses_centralized
     try:
@@ -834,10 +896,10 @@ def main(cfg: DictConfig) -> None:
     # Get global model and evaluate using test set
     # only load model if file exists
     try:
-        if os.path.isfile('best_global_model.keras'):
+        if os.path.isfile(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras'):
             print("Loading model from file")
             model = get_model([128, 128, 1], [128, 128, 1])
-            model.load_weights('best_global_model.keras')
+            model.load_weights(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
             loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=1)
             print()
             print("-----TEST RESULTS-----")

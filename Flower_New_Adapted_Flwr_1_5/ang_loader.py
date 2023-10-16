@@ -389,7 +389,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
-    
+    sum = 0
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
         num_train_images = count_images_in_loader2(trainloader)
         num_val_images = count_images_in_loader2(valloader)
@@ -437,7 +437,7 @@ def count_images_in_loader(loader):
 def main():
     trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
     print("Loaded")
-    sum = 0
+    
     # Counting images in trainloaders and valloaders for each client
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
         num_train_images = count_images_in_loader2(trainloader)
