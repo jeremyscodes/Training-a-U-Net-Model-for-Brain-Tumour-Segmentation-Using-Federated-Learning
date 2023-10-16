@@ -487,8 +487,8 @@ class FlowerClient(fl.client.NumPyClient):
         # get global model to be evaluated on client's validation data
         self.model.set_weights(parameters)
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
-        loss, dice_coef, soft_dice_coef = self.model.evaluate(self.valloader, verbose=2)
-        return float(loss), self.num_val_samples, {'dice_coef':dice_coef, 'soft_dice_coef':soft_dice_coef}
+        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = self.model.evaluate(self.valloader, verbose=2)
+        return float(loss), self.num_val_samples, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
 
 
 def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
@@ -548,9 +548,9 @@ def get_evaluate_fn(valset,input_shape,output_shape):
         print("evaluate function called after every round by strategy")
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, dice_coef, soft_dice_coef = model.evaluate(valset, verbose=0)
+        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(valset, verbose=0)
         
-        return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef}
+        return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
     return evaluate
 
 
@@ -562,12 +562,19 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
     # Multiply each metric of every client by the number of examples used
     dice_coef = [num_examples * m["dice_coef"] for num_examples, m in metrics]
     soft_dice_coef = [num_examples * m["soft_dice_coef"] for num_examples, m in metrics]
+    precision = [num_examples * m["precision"] for num_examples, m in metrics]
+    accuracy = [num_examples * m["accuracy"] for num_examples, m in metrics]
+    specificity = [num_examples * m["specificity"] for num_examples, m in metrics]
     examples = [num_examples for num_examples, _ in metrics]
+
 
     # Aggregate and return custom metrics (weighted average)
     return {
         "dice_coef": sum(dice_coef) / sum(examples),
-        "soft_dice_coef": sum(soft_dice_coef) / sum(examples)
+        "soft_dice_coef": sum(soft_dice_coef) / sum(examples),
+        "precision": sum(precision) / sum(examples),
+        "accuracy": sum(accuracy) / sum(examples),
+        "specificity": sum(specificity) / sum(examples)
     }
 
 class CustomFedAvg(fl.server.strategy.FedAvg):#FedAdam
@@ -763,16 +770,16 @@ def main(cfg: DictConfig) -> None:
     
     # With a dictionary, you tell Flower's VirtualClientEngine that each
     # client needs exclusive access to these many resources in order to run
-    client_resources = {
-        "num_cpus": cfg.num_cpus,
-        "num_gpus": cfg.num_gpus,
-    }
+    # NOTE commenting out resouces since docs say it is auto determined by ray
+    # client_resources = {
+    #     "num_cpus": cfg.num_cpus,
+    #     "num_gpus": cfg.num_gpus,
+    # }
     
     # Start simulation
     history = fl.simulation.start_simulation(
         client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients, input_shape,output_shape),
         num_clients=cfg.num_clients,
-        client_resources=client_resources,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
         server=MyServer(client_manager=SimpleClientManager(),strategy=MyStrategy),
         actor_kwargs={
@@ -786,7 +793,7 @@ def main(cfg: DictConfig) -> None:
         
         # Loop over each client's metrics for plotting
         for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
-            plt.figure(figsize=(15, 5 * len(MyStrategy.client_metrics)))
+            plt.figure(figsize=(15, 5))
             losses = [metrics['loss'] for metrics in metrics_list]
             dice_coefs = [metrics['dice_coef'] for metrics in metrics_list]
             soft_dice_coefs = [metrics['soft_dice_coef'] for metrics in metrics_list]
@@ -874,6 +881,64 @@ def main(cfg: DictConfig) -> None:
         np.save(f'{random_letter}_global_model_softDC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["soft_dice_coef"])
     except: 
         print("Failed to plot global model soft dice coefficient and save raw data")
+        np.save(f'{random_letter}_global_model_softDC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["soft_dice_coef"])
+
+    try:
+        print(f"{history.metrics_centralized = }")
+        np.save(f'{random_letter}_global_model_Precision_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["precision"])
+
+        #save data for this plot with np.save
+        global_dice_centralised = history.metrics_centralized["precision"]
+        round = [data[0] for data in global_dice_centralised]
+        dice = [100.0 * data[1] for data in global_dice_centralised]
+        plt.plot(round, dice)
+        plt.grid()
+        plt.ylabel("Precision (%)")
+        plt.xlabel("Round")
+        plt.title(f"Aggregated model's Precision with {cfg.num_clients} clients")
+        # save the plot
+        plt.savefig(f'{random_letter}_global_model_Precision_{cfg.num_clients}_clients_FedAvg.png')
+        plt.figure()
+    except: 
+        print("Failed to plot global model precision and save raw data")
+
+    try:
+        print(f"{history.metrics_centralized = }")
+        np.save(f'{random_letter}_global_model_Accuracy_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["accuracy"])
+
+        #save data for this plot with np.save
+        global_dice_centralised = history.metrics_centralized["accuracy"]
+        round = [data[0] for data in global_dice_centralised]
+        dice = [100.0 * data[1] for data in global_dice_centralised]
+        plt.plot(round, dice)
+        plt.grid()
+        plt.ylabel("Accuracy (%)")
+        plt.xlabel("Round")
+        plt.title(f"Aggregated model's accuracy with {cfg.num_clients} clients")
+        # save the plot
+        plt.savefig(f'{random_letter}_global_model_accuracy_{cfg.num_clients}_clients_FedAvg.png')
+        plt.figure()
+    except: 
+        print("Failed to plot global model Accuracy and save raw data")
+
+    try:
+        print(f"{history.metrics_centralized = }")
+        np.save(f'{random_letter}_global_model_Specificity_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["specificity"])
+
+        #save data for this plot with np.save
+        global_dice_centralised = history.metrics_centralized["specificity"]
+        round = [data[0] for data in global_dice_centralised]
+        dice = [100.0 * data[1] for data in global_dice_centralised]
+        plt.plot(round, dice)
+        plt.grid()
+        plt.ylabel("Specificity (%)")
+        plt.xlabel("Round")
+        plt.title(f"Aggregated model's specificity with {cfg.num_clients} clients")
+        # save the plot
+        plt.savefig(f'{random_letter}_global_model_specificity_{cfg.num_clients}_clients_FedAvg.png')
+        plt.figure()
+    except: 
+        print("Failed to plot global model specificity and save raw data")
 
     #plot history.losses_centralized
     try:
@@ -900,12 +965,15 @@ def main(cfg: DictConfig) -> None:
             print("Loading model from file")
             model = get_model([128, 128, 1], [128, 128, 1])
             model.load_weights(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
-            loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=1)
+            loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=1)
             print()
             print("-----TEST RESULTS-----")
             print("Test Loss: ",loss)
             print("Test Dice Coefficient: ",dice_coef)
             print("Test Soft Dice Coefficient: ",soft_dice_coef)
+            print("Test Precision: ",precision)
+            print("Test Accuracy: ",accuracy)
+            print("Test Specificity: ",specificity)
     except:
         print("Failed to load model from file and evaluate")
     #try catch the below block of code
@@ -915,7 +983,7 @@ def main(cfg: DictConfig) -> None:
         print("Loading model from global_parameters")
         model = get_model([128, 128, 1], [128, 128, 1])
         model.set_weights(MyStrategy.global_parameters)
-        loss, dice_coef, soft_dice_coef = model.evaluate(testloader, verbose=2)
+        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=2)
         print()
         print("-----TEST RESULTS-----")
         print("Test Loss: ",loss)
@@ -927,8 +995,12 @@ def main(cfg: DictConfig) -> None:
         
     
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Change config_name from terminal.")
+    parser.add_argument('--config_name', default='base', help='Name of the config to be used')
+    args = parser.parse_args()
+
     config_path = os.path.abspath("conf")
     with initialize_config_dir(config_dir=config_path, version_base=None):
-        cfg = compose(config_name="base")
+        cfg = compose(config_name=args.config_name)
         main(cfg)
 
