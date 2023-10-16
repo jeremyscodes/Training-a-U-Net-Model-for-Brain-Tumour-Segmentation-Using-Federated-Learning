@@ -272,6 +272,18 @@ def split_into_n_partitions(data, n):
 
     return partitions
 
+def count_images_in_loader2(loader):
+    total_images = 0
+    num_batches = len(loader)
+    num_slices_per_scan = loader.num_slices_per_scan  # 155 as verified
+    
+    for idx in range(num_batches):
+        start_idx = idx * loader.batch_size
+        end_idx = (idx + 1) * loader.batch_size
+        actual_batch_size = min(end_idx, len(loader.filenames)) - start_idx
+        total_images += actual_batch_size * num_slices_per_scan  # total_images in this batch
+    
+    return total_images
 
 def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
     crop_dim=128  # Original resolution (240)
@@ -279,18 +291,37 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
 
     #IID Partitioning
 
-    train_data = pd.read_csv('BRaTSdataset_filenames.csv')
-    #print numer of rows in train_data
-    print("Number of rows in train_data:",len(train_data)) #= 484 rows
-    # Splitting the data into training and testing sets using indices
-    train_indices, test_indices = train_test_split(train_data.index, test_size=0.2, random_state=42)
-    #split train_indices into train and validation
-    train_indices, val_indices = train_test_split(train_indices, test_size=0.25, random_state=42)
-    # Train: 60%, Val: 20%, Test: 20%
+    full_data = pd.read_csv('BRaTSdataset_filenames.csv')
+    test_data = pd.read_csv('test_file_paths_clean.csv')
+
+    # Remove test_data rows from full_data to avoid overlap
+    train_data = full_data[~full_data['path'].isin(test_data['path'])]
+    train_data = train_data.reset_index(drop=True)
+
+    print("Number of rows in full_data:",len(full_data)) 
+    print("Number of rows in train_data:",len(train_data)) 
+
+    # Splitting the data into training and validation sets using indices
+    train_indices, val_indices = train_test_split(train_data.index, test_size=0.25, random_state=42)
+
+    print(min(train_indices), max(train_indices))
+    print(min(val_indices), max(val_indices))   
+
+    # # Splitting the data into training and testing sets using indices
+    # train_indices, test_indices = train_test_split(train_data.index, test_size=0.2, random_state=42)
+    # #split train_indices into train and validation
+    # train_indices, val_indices = train_test_split(train_indices, test_size=0.25, random_state=42)
+    # # Train: 60%, Val: 20%, Test: 20%
 
     train_dataset = train_data.iloc[train_indices]
     val_dataset = train_data.iloc[val_indices]
-    test_dataset = train_data.iloc[test_indices]
+    test_dataset = test_data
+
+        
+    # Print the shape of each set
+    print("Train set shape:", train_dataset.shape)
+    print("Validation set shape:", val_dataset.shape)
+    print("Test set shape:", test_dataset.shape)
 
     client_sets = split_into_n_partitions(train_dataset,num_partitions)
          #trainsets[0] gives file names for training data for client 0
@@ -358,6 +389,25 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
+    
+    for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
+        num_train_images = count_images_in_loader2(trainloader)
+        num_val_images = count_images_in_loader2(valloader)
+        sum += num_train_images + num_val_images
+        print(f"Client {idx + 1}:")
+        print(f"Number of images in trainloader: {num_train_images}")
+        print(f"Number of images in valloader: {num_val_images}")
+        print("----------------------")
+
+    global_valloader_images = count_images_in_loader2(valloader_global)
+    sum += global_valloader_images
+    print(f"Number of images in global_valloader: {global_valloader_images}")
+    # Counting images in testloader
+    testloader_images = count_images_in_loader2(testloader)
+    sum += testloader_images
+    print(f"Number of images in testloader: {testloader_images}")
+    print(f"Total number of images: {sum}")
+    print(f"Total number of scans: {sum/155}")
         #  60%                       20%               20%
     return trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape
 #Finished Fixing on Wednesday 23 August 
@@ -380,34 +430,31 @@ def count_images_in_loader(loader):
         
     return total_images
 
-def count_images_in_loader2(loader):
-    total_images = 0
-    num_batches = len(loader)
-    num_slices_per_scan = loader.num_slices_per_scan  # 155 as verified
-    
-    for idx in range(num_batches):
-        start_idx = idx * loader.batch_size
-        end_idx = (idx + 1) * loader.batch_size
-        actual_batch_size = min(end_idx, len(loader.filenames)) - start_idx
-        total_images += actual_batch_size * num_slices_per_scan  # total_images in this batch
-    
-    return total_images
+
 
 
 
 def main():
-    
-    
-    trainloaders, valloaders, testloader, input_shape, output_shape = load_datasets(num_partitions=8,batch_size=20,  val_ratio=0.1)
+    trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
     print("Loaded")
-   
+    sum = 0
     # Counting images in trainloaders and valloaders for each client
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
+        num_train_images = count_images_in_loader2(trainloader)
+        num_val_images = count_images_in_loader2(valloader)
+        sum += num_train_images + num_val_images
         print(f"Client {idx + 1}:")
-        print(f"Number of images in trainloader: {count_images_in_loader2(trainloader)}")
-        print(f"Number of images in valloader: {count_images_in_loader2(valloader)}")
+        print(f"Number of images in trainloader: {num_train_images}")
+        print(f"Number of images in valloader: {num_val_images}")
         print("----------------------")
 
-    # # Counting images in testloader
-    print(f"Number of images in testloader: {count_images_in_loader2(testloader)}")
+    global_valloader_images = count_images_in_loader2(valloader_global)
+    sum += global_valloader_images
+    print(f"Number of images in global_valloader: {global_valloader_images}")
+    # Counting images in testloader
+    testloader_images = count_images_in_loader2(testloader)
+    sum += testloader_images
+    print(f"Number of images in testloader: {testloader_images}")
+    print(f"Total number of images: {sum}")
+    print(f"Total number of scans: {sum/155}")
 if __name__ == "__main__": main()

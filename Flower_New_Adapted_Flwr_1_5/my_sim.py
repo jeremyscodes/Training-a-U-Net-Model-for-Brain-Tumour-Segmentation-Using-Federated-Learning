@@ -681,14 +681,14 @@ def main(cfg: DictConfig) -> None:
     if cfg.num_clients != num_clients:
         print("Error: dataloader did not return the correct number of training sets: ",num_clients,"!=",cfg.num_clients)
     train_sample_dict={
-        2:[33790,33790],
-        4:[16895,16895,16895,16895],
-        8:[8525,8525,8525,8525,8370,8370,8370,8370]
+        2:[22785,22785],
+        4:[11470,11470,11315,11315],#updated
+        8:[5735,5735,5735,5735,5735,5735,5580,5580] #updated
     }
     val_sample_dict={
-        2:[3720,3780],
-        4:[1860,1860,1860,1860],
-        8:[930,930,930,930,930,930,930,930]
+        2:[2480,2480],
+        4:[1240,1240,1240,1240],#updated
+        8:[620,620,620,620,620,620,620,620] #updated
     }
     # get num training samples for each client from train_sample_dict
     num_train_samples_clients = train_sample_dict[cfg.num_clients]
