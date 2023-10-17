@@ -6,7 +6,7 @@ import settings
 import csv
 
     
-def get_decathlon_filelist(data_path, seed=816, split=0.85):
+def get_decathlon_filelist(data_path, seed=816, split=0.6):
     """
     Get the paths for the original decathlon files
     """
@@ -70,6 +70,34 @@ def get_decathlon_filelist(data_path, seed=816, split=0.85):
         writer = csv.writer(csvfile)
         for path in testFiles:
             writer.writerow([path])
+    with open("train_file_paths.csv", "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for path in trainFiles:
+            writer.writerow([path])
+    with open("val_file_paths.csv", "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for path in validateFiles:
+            writer.writerow([path])
+
+    use_previous_sets = True
+    # if use previous sets is true, read in the files from the csv
+    if use_previous_sets:
+        with open("test_file_paths.csv", "r") as csvfile:
+            reader = csv.reader(csvfile)
+            testFiles = []
+            for row in reader:
+                testFiles.append(row[0])
+        with open("train_file_paths.csv", "r") as csvfile:
+            reader = csv.reader(csvfile)
+            trainFiles = []
+            for row in reader:
+                trainFiles.append(row[0])
+        with open("val_file_paths.csv", "r") as csvfile:
+            reader = csv.reader(csvfile)
+            validateFiles = []
+            for row in reader:
+                validateFiles.append(row[0])
+        print("Using previous sets")
 
     print("Number of training files   = {}".format(len(trainList)))
     print("Number of validation files = {}".format(len(validateList)))

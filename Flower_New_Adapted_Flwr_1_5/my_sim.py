@@ -125,7 +125,7 @@ class unet(object):
         self.output_path = output_path
         self.inference_filename = inference_filename
 
-        self.metrics = [self.dice_coef, self.soft_dice_coef, self.precision, self.accuracy, self.specificity]
+        self.metrics = [self.dice_coef, self.soft_dice_coef, self.iou_coef, self.precision, self.accuracy, self.specificity]
 
         self.loss = self.dice_coef_loss
         # self.loss = self.combined_dice_ce_loss
@@ -137,6 +137,7 @@ class unet(object):
             "dice_coef_loss": self.dice_coef_loss,
             "dice_coef": self.dice_coef,
             "soft_dice_coef": self.soft_dice_coef,
+            "iou_coef": self.iou_coef,
             "precision": self.precision,
             "accuracy": self.accuracy,
             "specificity": self.specificity}
@@ -162,6 +163,20 @@ class unet(object):
         numerator = tf.constant(2.) * intersection + smooth
         denominator = union + smooth
         coef = numerator / denominator
+
+        return tf.reduce_mean(coef)
+    
+    def iou_coef(self, target, prediction, axis=(1, 2), smooth=0.0001):
+        """
+        Intersection over Union (IoU)
+        \frac{\text{Intersection}}{\text{Union}} = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}}
+        where T is the ground truth mask and P is the prediction mask
+        """
+        prediction = K.round(prediction)  # Round to 0 or 1
+
+        intersection = tf.reduce_sum(target * prediction, axis=axis)
+        union = tf.reduce_sum(target + prediction, axis=axis) - intersection
+        coef = (intersection + smooth) / (union + smooth)
 
         return tf.reduce_mean(coef)
 
@@ -477,6 +492,10 @@ class FlowerClient(fl.client.NumPyClient):
             'loss': history.history['loss'][0],
             'dice_coef': history.history['dice_coef'][0],
             'soft_dice_coef': history.history['soft_dice_coef'][0],
+            'iou_coef': history.history['iou_coef'][0],
+            'precision': history.history['precision'][0],
+            'accuracy': history.history['accuracy'][0],
+            'specificity': history.history['specificity'][0]
             # 'val_loss': history.history['val_loss'][0],
             # 'val_dice_coef': history.history['val_dice_coef'][0],
             # 'val_soft_dice_coef': history.history['val_soft_dice_coef'][0]
@@ -487,8 +506,8 @@ class FlowerClient(fl.client.NumPyClient):
         # get global model to be evaluated on client's validation data
         self.model.set_weights(parameters)
         'check model.py line 76 ,81. Here we might need to add loss to the metrics so that it gets returned here> dont think so, loss is a normal return'
-        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = self.model.evaluate(self.valloader, verbose=2)
-        return float(loss), self.num_val_samples, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
+        loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = self.model.evaluate(self.valloader, verbose=2)
+        return float(loss), self.num_val_samples, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"iou_coef":iou_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
 
 
 def get_client_fn(trainloaders, valloaders, num_train_samples_clients, num_val_samples_clients, model_input_shape, model_output_shape):
@@ -548,9 +567,9 @@ def get_evaluate_fn(valset,input_shape,output_shape):
         print("evaluate function called after every round by strategy")
         model = get_model([128, 128, 1],[128, 128, 1])  # Construct the model
         model.set_weights(parameters)  # Update model with the latest parameters
-        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(valset, verbose=0)
+        loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = model.evaluate(valset, verbose=0)
         
-        return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
+        return loss, {"dice_coef": dice_coef,"soft_dice_coef": soft_dice_coef,"iou_coef":iou_coef,"precision":precision,"accuracy":accuracy,"specificity":specificity}
     return evaluate
 
 
@@ -562,6 +581,7 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
     # Multiply each metric of every client by the number of examples used
     dice_coef = [num_examples * m["dice_coef"] for num_examples, m in metrics]
     soft_dice_coef = [num_examples * m["soft_dice_coef"] for num_examples, m in metrics]
+    iou_coef = [num_examples * m["iou_coef"] for num_examples, m in metrics]
     precision = [num_examples * m["precision"] for num_examples, m in metrics]
     accuracy = [num_examples * m["accuracy"] for num_examples, m in metrics]
     specificity = [num_examples * m["specificity"] for num_examples, m in metrics]
@@ -572,6 +592,7 @@ def weighted_average(metrics: List[Tuple[int, dict]]) -> dict:
     return {
         "dice_coef": sum(dice_coef) / sum(examples),
         "soft_dice_coef": sum(soft_dice_coef) / sum(examples),
+        "iou_coef": sum(iou_coef) / sum(examples),#iou_coef
         "precision": sum(precision) / sum(examples),
         "accuracy": sum(accuracy) / sum(examples),
         "specificity": sum(specificity) / sum(examples)
@@ -598,7 +619,7 @@ class MyServer(FlowerServer):
         super().__init__(*args, **kwargs)
         self.prev_val_loss = float('inf')  # For early stopping
         self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 50  # Patience for early stopping
+        self.patience = 40  # Patience for early stopping
         self.global_parameters = None
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
@@ -771,15 +792,16 @@ def main(cfg: DictConfig) -> None:
     # With a dictionary, you tell Flower's VirtualClientEngine that each
     # client needs exclusive access to these many resources in order to run
     # NOTE commenting out resouces since docs say it is auto determined by ray
-    # client_resources = {
-    #     "num_cpus": cfg.num_cpus,
-    #     "num_gpus": cfg.num_gpus,
-    # }
+    client_resources = {
+        "num_cpus": cfg.num_cpus,
+        "num_gpus": cfg.num_gpus,
+    }
     
     # Start simulation
     history = fl.simulation.start_simulation(
         client_fn=get_client_fn(trainloaders, valloaders,num_train_samples_clients, num_val_samples_clients, input_shape,output_shape),
         num_clients=cfg.num_clients,
+        client_resources=client_resources,
         config=fl.server.ServerConfig(num_rounds=cfg.num_rounds),
         server=MyServer(client_manager=SimpleClientManager(),strategy=MyStrategy),
         actor_kwargs={
@@ -843,6 +865,26 @@ def main(cfg: DictConfig) -> None:
     except:
         print("Failed to plot client metrics")
 
+    try:
+        for idx, (client_id, metrics_list) in enumerate(MyStrategy.client_metrics.items()):
+            plt.figure(figsize=(15, 5))
+            iou = [metrics['iou_coef'] for metrics in metrics_list]
+            # save as npy file
+            np.save(f'{random_letter}_FLFedAvg_{cfg.num_clients}_client_{client_id}_iou.npy', iou)
+
+            iou = [100.0 * data for data in iou]
+
+            # Plotting Loss for the client
+            plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 1)
+            plt.plot(iou, label=f'Client {client_id} Loss')
+            plt.title(f'Client {client_id} IOU over Rounds')
+            plt.xlabel('Rounds')
+            plt.ylabel('IOU')
+            plt.xticks(range(0,len(iou)+10,10))
+            # plt.ylim(0, 100)  # set y-axis range to 0-100
+            plt.legend()
+    except:
+        print("couldn't plot iou")
     #try catch the below plotting code  
     try:
         print(f"{history.metrics_centralized = }")
@@ -965,12 +1007,13 @@ def main(cfg: DictConfig) -> None:
             print("Loading model from file")
             model = get_model([128, 128, 1], [128, 128, 1])
             model.load_weights(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
-            loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=1)
+            loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=1)
             print()
             print("-----TEST RESULTS-----")
             print("Test Loss: ",loss)
             print("Test Dice Coefficient: ",dice_coef)
             print("Test Soft Dice Coefficient: ",soft_dice_coef)
+            print("Test IOU Coefficient: ",iou_coef)
             print("Test Precision: ",precision)
             print("Test Accuracy: ",accuracy)
             print("Test Specificity: ",specificity)
@@ -983,7 +1026,7 @@ def main(cfg: DictConfig) -> None:
         print("Loading model from global_parameters")
         model = get_model([128, 128, 1], [128, 128, 1])
         model.set_weights(MyStrategy.global_parameters)
-        loss, dice_coef, soft_dice_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=2)
+        loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=2)
         print()
         print("-----TEST RESULTS-----")
         print("Test Loss: ",loss)

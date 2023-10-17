@@ -78,7 +78,7 @@ class unet(object):
         self.inference_filename = inference_filename
 
         # self.metrics = [self.dice_coef, self.soft_dice_coef]
-        self.metrics = [self.dice_coef, self.soft_dice_coef, self.precision, self.accuracy, self.specificity]
+        self.metrics = [self.dice_coef, self.soft_dice_coef, self.iou_coef, self.precision, self.accuracy, self.specificity]
 
         self.loss = self.dice_coef_loss
         #self.loss = self.combined_dice_ce_loss
@@ -115,6 +115,20 @@ class unet(object):
         numerator = tf.constant(2.) * intersection + smooth
         denominator = union + smooth
         coef = numerator / denominator
+
+        return tf.reduce_mean(coef)
+    
+    def iou_coef(self, target, prediction, axis=(1, 2), smooth=0.0001):
+        """
+        Intersection over Union (IoU)
+        \frac{\text{Intersection}}{\text{Union}} = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}}
+        where T is the ground truth mask and P is the prediction mask
+        """
+        prediction = K.round(prediction)  # Round to 0 or 1
+
+        intersection = tf.reduce_sum(target * prediction, axis=axis)
+        union = tf.reduce_sum(target + prediction, axis=axis) - intersection
+        coef = (intersection + smooth) / (union + smooth)
 
         return tf.reduce_mean(coef)
 

@@ -3,6 +3,7 @@ import numpy as np
 import nibabel as nib
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import csv
 '''State Storage: The generator does not store the actual image and label data in its state.
  It only stores the filenames, batch size, and other configuration parameters needed to generate the batches.'''
 class SerializableDatasetGenerator(tf.keras.utils.Sequence):
@@ -288,34 +289,62 @@ def count_images_in_loader2(loader):
 def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
     crop_dim=128  # Original resolution (240)
     seed=816
-
+    use_previous_sets = True
     #IID Partitioning
+    if use_previous_sets is False:
+        full_data = pd.read_csv('BRaTSdataset_filenames.csv')
+        test_data = pd.read_csv('test_file_paths_clean.csv')
 
-    full_data = pd.read_csv('BRaTSdataset_filenames.csv')
-    test_data = pd.read_csv('test_file_paths_clean.csv')
 
-    # Remove test_data rows from full_data to avoid overlap
-    train_data = full_data[~full_data['path'].isin(test_data['path'])]
-    train_data = train_data.reset_index(drop=True)
+        # Remove test_data rows from full_data to avoid overlap
+        train_data = full_data[~full_data['path'].isin(test_data['path'])]
+        train_data = train_data.reset_index(drop=True)
 
-    print("Number of rows in full_data:",len(full_data)) 
-    print("Number of rows in train_data:",len(train_data)) 
+        print("Number of rows in full_data:",len(full_data)) 
+        print("Number of rows in train_data:",len(train_data)) 
 
-    # Splitting the data into training and validation sets using indices
-    train_indices, val_indices = train_test_split(train_data.index, test_size=0.25, random_state=42)
+        # Splitting the data into training and validation sets using indices
+        train_indices, val_indices = train_test_split(train_data.index, test_size=0.25, random_state=42)
 
-    print(min(train_indices), max(train_indices))
-    print(min(val_indices), max(val_indices))   
+        print(min(train_indices), max(train_indices))
+        print(min(val_indices), max(val_indices))   
 
-    # # Splitting the data into training and testing sets using indices
-    # train_indices, test_indices = train_test_split(train_data.index, test_size=0.2, random_state=42)
-    # #split train_indices into train and validation
-    # train_indices, val_indices = train_test_split(train_indices, test_size=0.25, random_state=42)
-    # # Train: 60%, Val: 20%, Test: 20%
+        # # Train: 60%, Val: 20%, Test: 20%
 
-    train_dataset = train_data.iloc[train_indices]
-    val_dataset = train_data.iloc[val_indices]
-    test_dataset = test_data
+        train_dataset = train_data.iloc[train_indices]
+        val_dataset = train_data.iloc[val_indices]
+        test_dataset = test_data
+
+    import csv
+
+    def clean_paths(input_filename,output_filename):
+        with open(input_filename, 'r') as csvfile:
+            reader = csv.reader(csvfile)
+            rows = [row for row in reader]
+            
+            modified_rows = [['path']]  # Add the title 'path' at the first row position
+            for row in rows:
+                modified_row = [cell.replace('./labelsTr/', './imagesTr/') for cell in row]
+                modified_row = [cell.replace('../Task01_BrainTumour', '.') for cell in modified_row] # Add this line to replace the string '../Task01_BrainTumour' with '.'
+                modified_rows.append(modified_row)
+        with open(output_filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerows(modified_rows)
+    
+    if use_previous_sets:
+        input_filename = 'test_file_paths.csv'
+        output_filename = 'test_file_paths_clean.csv'
+        clean_paths(input_filename,output_filename)
+        input_filename = 'train_file_paths.csv'
+        output_filename = 'train_file_paths_clean.csv'
+        clean_paths(input_filename,output_filename)
+        input_filename = 'val_file_paths.csv'
+        output_filename = 'val_file_paths_clean.csv'
+        clean_paths(input_filename,output_filename)
+                
+        train_dataset = pd.read_csv('train_file_paths_clean.csv')
+        val_dataset = pd.read_csv('val_file_paths_clean.csv')
+        test_dataset = pd.read_csv('test_file_paths_clean.csv')
 
         
     # Print the shape of each set
@@ -331,10 +360,12 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
 
     # Contains client partitians, inside of which are images_batches and masks_batchs
     trainloaders = []
-
     valloaders = []
+    all_train_files = []  # Collect all training file names across all clients
+
     first = True
     for client_set in client_sets:
+        
         # Split into training and validation
 
         train_val_partitions = split_into_train_val(client_set, val_ratio)  
@@ -344,6 +375,8 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
 
         file_names_train = train_val_partitions[0]['path'].tolist()
         file_names_train = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_train]
+
+        all_train_files.extend(file_names_train)  # Add to the collection
 
 
         # file_names_val = [fname for tup in train_val_partitions[1] for fname in tup[1]['paths'].tolist()]
@@ -384,11 +417,24 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
     file_names_test = test_dataset['path'].tolist()
     file_names_test = ["../Task01_BrainTumour" + fname[1:] for fname in file_names_test]
 
+    # Check for overlaps between all_train_files and file_names_test
+    overlapping_files = set(all_train_files).intersection(file_names_test)
+    if overlapping_files:
+        print(f"Warning! There are overlapping files between training and test datasets: {overlapping_files}")
+    else:
+        print("No overlaps found between training and test datasets.")
+
+    print(all_train_files[:5])
+    print()
+    print(file_names_test[:5])
+
+
     testloader = SerializableDatasetGenerator(file_names_test, 
                            batch_size=batch_size, 
                            crop_dim=[crop_dim, crop_dim], 
                            augment=False, 
                            seed=seed)
+ 
     sum = 0
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
         num_train_images = count_images_in_loader2(trainloader)
@@ -439,6 +485,7 @@ def main():
     print("Loaded")
     
     # Counting images in trainloaders and valloaders for each client
+    sum=0
     for idx, (trainloader, valloader) in enumerate(zip(trainloaders, valloaders)):
         num_train_images = count_images_in_loader2(trainloader)
         num_val_images = count_images_in_loader2(valloader)

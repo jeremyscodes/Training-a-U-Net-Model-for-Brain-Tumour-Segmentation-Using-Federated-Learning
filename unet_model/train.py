@@ -163,7 +163,7 @@ if __name__ == "__main__":
     print("Loading the data from the Medical Decathlon directory to a TensorFlow data loader ...")
     print("-" * 30)
 
-    trainFiles, validateFiles, testFiles = get_decathlon_filelist(data_path=args.data_path, seed=args.seed, split=args.split)
+    trainFiles, validateFiles, testFiles = get_decathlon_filelist(data_path=args.data_path, seed=args.seed)
     print("Number of trainFiles")
     print(len(trainFiles))
     ds_train = DatasetGenerator(trainFiles, batch_size=args.batch_size, crop_dim=[args.crop_dim,args.crop_dim], augment=True, seed=args.seed)
