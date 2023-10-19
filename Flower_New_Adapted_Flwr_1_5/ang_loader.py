@@ -286,7 +286,7 @@ def count_images_in_loader2(loader):
     
     return total_images
 
-def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
+def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.1):
     crop_dim=128  # Original resolution (240)
     seed=816
     use_previous_sets = True
@@ -304,7 +304,7 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
         print("Number of rows in train_data:",len(train_data)) 
 
         # Splitting the data into training and validation sets using indices
-        train_indices, val_indices = train_test_split(train_data.index, test_size=0.25, random_state=42)
+        train_indices, val_indices = train_test_split(train_data.index, test_size=0.1, random_state=42)
 
         print(min(train_indices), max(train_indices))
         print(min(val_indices), max(val_indices))   
@@ -332,13 +332,13 @@ def load_datasets(num_partitions: int,batch_size: int,  val_ratio: float = 0.2):
             writer.writerows(modified_rows)
     
     if use_previous_sets:
-        input_filename = 'test_file_paths.csv'
+        input_filename = '../unet_model/test_file_paths.csv'
         output_filename = 'test_file_paths_clean.csv'
         clean_paths(input_filename,output_filename)
-        input_filename = 'train_file_paths.csv'
+        input_filename = '../unet_model/train_file_paths.csv'
         output_filename = 'train_file_paths_clean.csv'
         clean_paths(input_filename,output_filename)
-        input_filename = 'val_file_paths.csv'
+        input_filename = '../unet_model/val_file_paths.csv'
         output_filename = 'val_file_paths_clean.csv'
         clean_paths(input_filename,output_filename)
                 
@@ -481,7 +481,7 @@ def count_images_in_loader(loader):
 
 
 def main():
-    trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
+    trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=8,batch_size=20,  val_ratio=0.1)
     print("Loaded")
     
     # Counting images in trainloaders and valloaders for each client

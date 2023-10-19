@@ -172,7 +172,7 @@ class unet(object):
         \frac{\text{Intersection}}{\text{Union}} = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}}
         where T is the ground truth mask and P is the prediction mask
         """
-        prediction = K.round(prediction)  # Round to 0 or 1
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
 
         intersection = tf.reduce_sum(target * prediction, axis=axis)
         union = tf.reduce_sum(target + prediction, axis=axis) - intersection
@@ -195,7 +195,6 @@ class unet(object):
 
         return tf.reduce_mean(coef)
     
-    #My Metrics----------------------------
     def specificity(self, y_true, y_pred):
         """
         Compute specificity.
@@ -213,31 +212,40 @@ class unet(object):
         specificity = tn / (tn + fp + K.backend.epsilon())
         return specificity
 
-    # Redefining precision and accuracy for consistency
-    def precision(self, y_true, y_pred):
+    def precision(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """
-        Compute precision.
+        Precision
+        \frac{\left | T \right | \cap \left | P \right |}{\left | P \right |}
+        where T is the ground truth mask and P is the prediction mask
         """
-        # Threshold predictions
-        y_pred = K.backend.round(y_pred)
-        
-        # Count true positives
-        tp = K.backend.sum(K.backend.round(K.backend.clip(y_true * y_pred, 0, 1)))
-        
-        # Count predicted positives
-        pp = K.backend.sum(K.backend.round(K.backend.clip(y_pred, 0, 1)))
-        
-        # Compute precision
-        precision = tp / (pp + K.backend.epsilon())
-        return precision
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
 
-    def accuracy(self, y_true, y_pred):
+        true_positives = tf.reduce_sum(target * prediction, axis=axis)
+        predicted_positives = tf.reduce_sum(prediction, axis=axis)
+        numerator = true_positives + smooth
+        denominator = predicted_positives + smooth
+        coef = numerator / denominator
+
+        return tf.reduce_mean(coef)
+
+
+    def accuracy(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """
-        Compute binary accuracy.
+        Accuracy
+        \frac{\left | T \right | \cap \left | P \right | + \left | T \right | \cap \left | \neg P \right |}{\text{Total Predictions}}
+        where T is the ground truth mask, P is the prediction mask, and \neg P is the negation of the prediction mask
         """
-        y_pred_rounded = K.backend.round(y_pred)
-        correct_predictions = K.backend.equal(y_true, y_pred_rounded)
-        return K.backend.mean(correct_predictions, axis=-1)
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
+
+        true_positives = tf.reduce_sum(target * prediction, axis=axis)
+        true_negatives = tf.reduce_sum((1 - target) * (1 - prediction), axis=axis)
+        total_predictions = tf.reduce_prod(tf.shape(target)[1:])
+        
+        numerator = true_positives + true_negatives + smooth
+        denominator = tf.cast(total_predictions, tf.float32) + smooth
+        coef = numerator / denominator
+
+        return tf.reduce_mean(coef)
 
     # end of MY Metrics----------------------------------------------------------------------
 
@@ -619,8 +627,9 @@ class MyServer(FlowerServer):
         super().__init__(*args, **kwargs)
         self.prev_val_loss = float('inf')  # For early stopping
         self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 40  # Patience for early stopping
+        self.patience = 100  # Patience for early stopping
         self.global_parameters = None
+        self.best_parameters = None
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
         """Run federated averaging for a number of rounds."""
@@ -673,6 +682,7 @@ class MyServer(FlowerServer):
                     print("rounds_without_improvement = ",self.rounds_without_improvement)
                 else:
                     # model got better
+                    self.best_parameters = deepcopy(self.parameters)
                     self.rounds_without_improvement = 0
                     self.prev_val_loss = loss_cen
 
@@ -681,6 +691,8 @@ class MyServer(FlowerServer):
                     print("The final validation loss was: ", self.prev_val_loss, " which was achieved on round ", current_round - self.patience)
                     params = parameters_to_ndarrays(self.parameters)
                     self._save_model(params)
+                    params = parameters_to_ndarrays(self.best_parameters)
+                    self.save_modelbest(params)
                     self.global_parameters = deepcopy(params)
                     early_stopping_triggered = True
                     break
@@ -726,6 +738,11 @@ class MyServer(FlowerServer):
     def _save_model(self,weights):
         model = get_model([128, 128, 1], [128, 128, 1])
         model.set_weights(weights)
+        model.save(f'FLFedAvg_{cfg.num_clients}_clients_end_global_model.keras')
+        print("Saved model to disk.")
+    def _save_modelbest(self,weights):
+        model = get_model([128, 128, 1], [128, 128, 1])
+        model.set_weights(weights)
         model.save(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
         print("Saved model to disk.")
 
@@ -759,14 +776,14 @@ def main(cfg: DictConfig) -> None:
     if cfg.num_clients != num_clients:
         print("Error: dataloader did not return the correct number of training sets: ",num_clients,"!=",cfg.num_clients)
     train_sample_dict={
-        2:[22785,22785],
-        4:[11470,11470,11315,11315],#updated
-        8:[5735,5735,5735,5735,5735,5735,5580,5580] #updated
+        2:[20305,20305],#updated
+        4:[10230,10230,10075,10075],
+        8:[5270,5270,5115,5115,5115,5115,5115,5115] 
     }
     val_sample_dict={
-        2:[2480,2480],
-        4:[1240,1240,1240,1240],#updated
-        8:[620,620,620,620,620,620,620,620] #updated
+        2:[2170,2170],#updated
+        4:[1085,1085,1085,1085],
+        8:[465,465,465,465,465,465,465,465] 
     }
     # get num training samples for each client from train_sample_dict
     num_train_samples_clients = train_sample_dict[cfg.num_clients]
@@ -1003,8 +1020,25 @@ def main(cfg: DictConfig) -> None:
     # Get global model and evaluate using test set
     # only load model if file exists
     try:
+        if os.path.isfile(f'FLFedAvg_{cfg.num_clients}_clients_end_global_model.keras'):
+            print("Loading end model from file")
+            model = get_model([128, 128, 1], [128, 128, 1])
+            model.load_weights(f'FLFedAvg_{cfg.num_clients}_clients_end_global_model.keras')
+            loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=1)
+            print()
+            print("-----TEST RESULTS-----")
+            print("Test Loss: ",loss)
+            print("Test Dice Coefficient: ",dice_coef)
+            print("Test Soft Dice Coefficient: ",soft_dice_coef)
+            print("Test IOU Coefficient: ",iou_coef)
+            print("Test Precision: ",precision)
+            print("Test Accuracy: ",accuracy)
+            print("Test Specificity: ",specificity)
+    except:
+        print("Failed to load end model from file and evaluate")
+    try:
         if os.path.isfile(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras'):
-            print("Loading model from file")
+            print("Loading best model from file")
             model = get_model([128, 128, 1], [128, 128, 1])
             model.load_weights(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
             loss, dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity = model.evaluate(testloader, verbose=1)
@@ -1018,7 +1052,7 @@ def main(cfg: DictConfig) -> None:
             print("Test Accuracy: ",accuracy)
             print("Test Specificity: ",specificity)
     except:
-        print("Failed to load model from file and evaluate")
+        print("Failed to load best model from file and evaluate")
     #try catch the below block of code
     
     #do the same but with stategy.global_parameters

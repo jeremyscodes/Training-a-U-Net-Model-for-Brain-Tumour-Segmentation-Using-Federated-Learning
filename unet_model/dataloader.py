@@ -38,70 +38,74 @@ def get_decathlon_filelist(data_path, seed=816, split=0.6):
 	split the validation set into separate test and validation
 	sets.
 	"""
-    # Set the random seed so that always get same random mix
-    np.random.seed(seed)
-    numFiles = experiment_data["numTraining"]
-    idxList = np.arange(numFiles)  # List of file indices
-    np.random.shuffle(idxList) # Shuffle the indices to randomize train/test/split
-    
-    trainIdx = int(np.floor(numFiles*split)) # index for the end of the training files
-    trainList = idxList[:trainIdx]
+    use_previous_sets = True
+    if use_previous_sets is False:
+        # Set the random seed so that always get same random mix
+        np.random.seed(seed)
+        numFiles = experiment_data["numTraining"]
+        idxList = np.arange(numFiles)  # List of file indices
+        np.random.shuffle(idxList) # Shuffle the indices to randomize train/test/split
+        
+        trainIdx = int(np.floor(numFiles*split)) # index for the end of the training files
+        trainList = idxList[:trainIdx]
 
-    otherList = idxList[trainIdx:]
-    numOther = len(otherList)
-    otherIdx = numOther//2  # index for the end of the testing files
-    validateList = otherList[:otherIdx]
-    testList = otherList[otherIdx:]
+        otherList = idxList[trainIdx:]
+        numOther = len(otherList)
+        otherIdx = numOther//2  # index for the end of the testing files
+        validateList = otherList[:otherIdx]
+        testList = otherList[otherIdx:]
 
-    trainFiles = []
-    for idx in trainList:
-        trainFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
+        trainFiles = []
+        for idx in trainList:
+            trainFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
 
-    validateFiles = []
-    for idx in validateList:
-        validateFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
+        validateFiles = []
+        for idx in validateList:
+            validateFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
+
+        testFiles = []
+        for idx in testList:
+            testFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
+
+        # Save test file paths to CSV
+        with open("test_file_paths.csv", "w", newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            for path in testFiles:
+                writer.writerow([path])
+        with open("train_file_paths.csv", "w", newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            for path in trainFiles:
+                writer.writerow([path])
+        with open("val_file_paths.csv", "w", newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            for path in validateFiles:
+                writer.writerow([path])
 
     testFiles = []
-    for idx in testList:
-        testFiles.append(os.path.join(data_path, experiment_data["training"][idx]["label"]))
-
-    # Save test file paths to CSV
-    with open("test_file_paths.csv", "w", newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        for path in testFiles:
-            writer.writerow([path])
-    with open("train_file_paths.csv", "w", newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        for path in trainFiles:
-            writer.writerow([path])
-    with open("val_file_paths.csv", "w", newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        for path in validateFiles:
-            writer.writerow([path])
-
-    use_previous_sets = True
+    trainFiles = []
+    validateFiles = []
     # if use previous sets is true, read in the files from the csv
     if use_previous_sets:
         with open("test_file_paths.csv", "r") as csvfile:
             reader = csv.reader(csvfile)
-            testFiles = []
+            
             for row in reader:
                 testFiles.append(row[0])
         with open("train_file_paths.csv", "r") as csvfile:
             reader = csv.reader(csvfile)
-            trainFiles = []
+            
             for row in reader:
                 trainFiles.append(row[0])
         with open("val_file_paths.csv", "r") as csvfile:
             reader = csv.reader(csvfile)
-            validateFiles = []
+            
             for row in reader:
                 validateFiles.append(row[0])
         print("Using previous sets")
 
-    print("Number of training files   = {}".format(len(trainList)))
-    print("Number of validation files = {}".format(len(validateList)))
-    print("Number of testing files    = {}".format(len(testList)))
+    print("Number of training files   = {}".format(len(trainFiles)))
+    print("Number of validation files = {}".format(len(validateFiles)))
+    print("Number of testing files    = {}".format(len(testFiles)))
 
     return trainFiles, validateFiles, testFiles
 
@@ -240,10 +244,10 @@ class DatasetGenerator(Sequence):
                 img = img[:,:,:,0]  # Just take FLAIR channel (channel 0)
                 img = self.preprocess_img(img)
 
-                print("label_filename: ",label_filename)
+                # print("label_filename: ",label_filename)
                 label = np.array(nib.load(label_filename).dataobj)
                 label = self.preprocess_label(label)
-                print("label shape: ",label.shape)
+                # print("label shape: ",label.shape)
                 
                 # Crop input and label
                 img, label = self.crop_input(img, label)

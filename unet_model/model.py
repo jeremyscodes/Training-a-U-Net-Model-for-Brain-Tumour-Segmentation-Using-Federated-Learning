@@ -90,6 +90,7 @@ class unet(object):
             "dice_coef_loss": self.dice_coef_loss,
             "dice_coef": self.dice_coef,
             "soft_dice_coef": self.soft_dice_coef,
+            "iou_coef": self.iou_coef,
             "precision": self.precision,
             "accuracy": self.accuracy,
             "specificity": self.specificity}
@@ -124,7 +125,7 @@ class unet(object):
         \frac{\text{Intersection}}{\text{Union}} = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}}
         where T is the ground truth mask and P is the prediction mask
         """
-        prediction = K.round(prediction)  # Round to 0 or 1
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
 
         intersection = tf.reduce_sum(target * prediction, axis=axis)
         union = tf.reduce_sum(target + prediction, axis=axis) - intersection
@@ -184,33 +185,40 @@ class unet(object):
         specificity = tn / (tn + fp + K.backend.epsilon())
         return specificity
 
-    # Redefining precision and accuracy for consistency
-    def precision(self, y_true, y_pred):
+    def precision(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """
-        Compute precision.
+        Precision
+        \frac{\left | T \right | \cap \left | P \right |}{\left | P \right |}
+        where T is the ground truth mask and P is the prediction mask
         """
-        # Threshold predictions
-        y_pred = K.backend.round(y_pred)
-        
-        # Count true positives
-        tp = K.backend.sum(K.backend.round(K.backend.clip(y_true * y_pred, 0, 1)))
-        
-        # Count predicted positives
-        pp = K.backend.sum(K.backend.round(K.backend.clip(y_pred, 0, 1)))
-        
-        # Compute precision
-        precision = tp / (pp + K.backend.epsilon())
-        return precision
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
 
-    def accuracy(self, y_true, y_pred):
-        """
-        Compute binary accuracy.
-        """
-        y_pred_rounded = K.backend.round(y_pred)
-        correct_predictions = K.backend.equal(y_true, y_pred_rounded)
-        return K.backend.mean(correct_predictions, axis=-1)
+        true_positives = tf.reduce_sum(target * prediction, axis=axis)
+        predicted_positives = tf.reduce_sum(prediction, axis=axis)
+        numerator = true_positives + smooth
+        denominator = predicted_positives + smooth
+        coef = numerator / denominator
 
-    # end of MY Metrics----------------------------------------------------------------------
+        return tf.reduce_mean(coef)
+
+    def accuracy(self, target, prediction, axis=(1, 2), smooth=0.0001):
+        """
+        Accuracy
+        \frac{\left | T \right | \cap \left | P \right | + \left | T \right | \cap \left | \neg P \right |}{\text{Total Predictions}}
+        where T is the ground truth mask, P is the prediction mask, and \neg P is the negation of the prediction mask
+        """
+        prediction = K.backend.round(prediction)  # Round to 0 or 1
+
+        true_positives = tf.reduce_sum(target * prediction, axis=axis)
+        true_negatives = tf.reduce_sum((1 - target) * (1 - prediction), axis=axis)
+        total_predictions = tf.reduce_prod(tf.shape(target)[1:])
+        
+        numerator = true_positives + true_negatives + smooth
+        denominator = tf.cast(total_predictions, tf.float32) + smooth
+        coef = numerator / denominator
+
+        return tf.reduce_mean(coef)
+
 
     def combined_dice_ce_loss(self, target, prediction, axis=(1, 2), smooth=0.0001):
         """

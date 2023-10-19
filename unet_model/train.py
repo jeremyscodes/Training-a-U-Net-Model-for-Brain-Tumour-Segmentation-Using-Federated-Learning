@@ -138,6 +138,13 @@ def save_training_plots(history, output_path):
     except Exception as e:
         print(f"Error saving specificity plot: {e}")
 
+    try:
+        np.save(os.path.join(output_path, 'iou.npy'), np.column_stack((history.history['iou_coef'], history.history['val_iou_coef'])))
+        save_plot(history.history['iou_coef'], history.history['val_iou_coef'], 'iou_coef', 
+                  'Model IOU', os.path.join(output_path, 'iou_coef_plot.png'))
+    except Exception as e:
+        print(f"Error saving specificity plot: {e}")
+
 # You can now call this function to save the plots:
 # save_training_plots(history, 'path_to_save_plots')
 
