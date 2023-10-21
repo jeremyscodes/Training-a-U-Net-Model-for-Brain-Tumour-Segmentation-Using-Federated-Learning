@@ -732,11 +732,14 @@ class MyServer(FlowerServer):
             params = parameters_to_ndarrays(self.parameters)
             self._save_model(params)
             self.global_parameters = deepcopy(params)
+            # Save the best model as well
+            best_params = parameters_to_ndarrays(self.best_parameters)
+            self._save_modelbest(best_params)
             print("Ended without early stopping")
 
         # Bookkeeping
         end_time = timeit.default_timer()
-        elapsed = end_time - start_time
+        elapsed = end_time - start_time 
         log(INFO, "FL finished in %s", elapsed)
         return history
 
