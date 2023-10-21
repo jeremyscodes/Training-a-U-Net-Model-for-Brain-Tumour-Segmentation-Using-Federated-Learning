@@ -627,11 +627,14 @@ class MyServer(FlowerServer):
         super().__init__(*args, **kwargs)
         self.prev_val_loss = float('inf')  # For early stopping
         self.rounds_without_improvement = 0  # For early stopping
-        self.patience = 100  # Patience for early stopping
+        self.patience = 60  # Patience for early stopping
         self.global_parameters = None
         self.best_parameters = None
+        self.window_size=10
+        self.prev_moving_avg=float('inf')
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
+        recent_losses=[]
         """Run federated averaging for a number of rounds."""
         history = History()
         early_stopping_triggered = False
@@ -675,16 +678,19 @@ class MyServer(FlowerServer):
             if res_cen is not None:
                 loss_cen, metrics_cen = res_cen
                 print("Aggregated model: loss_centralized = ",loss_cen)
-                # NOTE Early stopping logic
-                if loss_cen >= self.prev_val_loss:
-                    # model got worse
+                recent_losses.append(loss_cen)
+                if len(recent_losses) > self.window_size:  # Assuming you've set a window_size attribute for your class
+                    recent_losses.pop(0)
+                current_moving_avg = np.mean(recent_losses)
+                if current_moving_avg >= self.prev_moving_avg:
+                    # model got worse based on moving average
                     self.rounds_without_improvement += 1
-                    print("rounds_without_improvement = ",self.rounds_without_improvement)
                 else:
-                    # model got better
+                    # model got better based on moving average
                     self.best_parameters = deepcopy(self.parameters)
                     self.rounds_without_improvement = 0
-                    self.prev_val_loss = loss_cen
+                    self.prev_moving_avg = current_moving_avg
+
 
                 if self.rounds_without_improvement >= self.patience:
                     print("Early stopping triggered due to no improvement in validation loss for", self.patience, "rounds.")
@@ -893,13 +899,16 @@ def main(cfg: DictConfig) -> None:
 
             # Plotting Loss for the client
             plt.subplot(len(MyStrategy.client_metrics), 3, idx * 3 + 1)
-            plt.plot(iou, label=f'Client {client_id} Loss')
+            plt.plot(iou, label=f'Client {client_id} IOU')
             plt.title(f'Client {client_id} IOU over Rounds')
             plt.xlabel('Rounds')
             plt.ylabel('IOU')
             plt.xticks(range(0,len(iou)+10,10))
             # plt.ylim(0, 100)  # set y-axis range to 0-100
             plt.legend()
+            plt.tight_layout()
+            plt.savefig(f'{random_letter}_FLFedAvg_{cfg.num_clients}_clients_iou_plots_FedAvg_client_{client_id}.png')
+            plt.figure()
     except:
         print("couldn't plot iou")
     #try catch the below plotting code  
@@ -921,9 +930,28 @@ def main(cfg: DictConfig) -> None:
         np.save(f'{random_letter}_global_model_DC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["dice_coef"])
     except: 
         print("Failed to plot global model dice coefficient and save raw data")
+
+    try:
+        # print(f"{history.metrics_centralized = }")
+        np.save(f'{random_letter}_global_model_IOU_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["iou_coef"])
+        #save data for this plot with np.save
+        global_dice_centralised = history.metrics_centralized["iou_coef"]
+        round = [data[0] for data in global_dice_centralised]
+        dice = [100.0 * data[1] for data in global_dice_centralised]
+        plt.plot(round, dice)
+        plt.grid()
+        plt.ylabel("IOU (%)")
+        plt.xlabel("Round")
+        plt.title(f"Aggregated model's IOU with {cfg.num_clients} clients")
+        # save the plot
+        plt.savefig(f'{random_letter}_global_model_IOU_{cfg.num_clients}_clients_FedAvg.png')
+        plt.figure()
+        
+    except: 
+        print("Failed to plot global model dice coefficient and save raw data")
     
     try:
-        print(f"{history.metrics_centralized = }")
+        # print(f"{history.metrics_centralized = }")
 
         #save data for this plot with np.save
         global_dice_centralised = history.metrics_centralized["soft_dice_coef"]
@@ -943,7 +971,7 @@ def main(cfg: DictConfig) -> None:
         np.save(f'{random_letter}_global_model_softDC_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["soft_dice_coef"])
 
     try:
-        print(f"{history.metrics_centralized = }")
+        # print(f"{history.metrics_centralized = }")
         np.save(f'{random_letter}_global_model_Precision_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["precision"])
 
         #save data for this plot with np.save
@@ -962,7 +990,7 @@ def main(cfg: DictConfig) -> None:
         print("Failed to plot global model precision and save raw data")
 
     try:
-        print(f"{history.metrics_centralized = }")
+        # print(f"{history.metrics_centralized = }")
         np.save(f'{random_letter}_global_model_Accuracy_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["accuracy"])
 
         #save data for this plot with np.save
@@ -981,7 +1009,7 @@ def main(cfg: DictConfig) -> None:
         print("Failed to plot global model Accuracy and save raw data")
 
     try:
-        print(f"{history.metrics_centralized = }")
+        # print(f"{history.metrics_centralized = }")
         np.save(f'{random_letter}_global_model_Specificity_{cfg.num_clients}_clients_FedAvg.npy', history.metrics_centralized["specificity"])
 
         #save data for this plot with np.save
