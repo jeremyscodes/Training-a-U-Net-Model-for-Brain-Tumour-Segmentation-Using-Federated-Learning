@@ -632,6 +632,7 @@ class MyServer(FlowerServer):
         self.best_parameters = None
         self.window_size=10
         self.prev_moving_avg=float('inf')
+        self.best_round=0
 
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
         recent_losses=[]
@@ -690,6 +691,7 @@ class MyServer(FlowerServer):
                     self.best_parameters = deepcopy(self.parameters)
                     self.rounds_without_improvement = 0
                     self.prev_moving_avg = current_moving_avg
+                    self.best_round = current_round
 
 
                 if self.rounds_without_improvement >= self.patience:
@@ -754,6 +756,8 @@ class MyServer(FlowerServer):
         model.set_weights(weights)
         model.save(f'FLFedAvg_{cfg.num_clients}_clients_Best_global_model.keras')
         print("Saved model to disk.")
+        print("Best round was round ",self.best_round)
+
 
 def main(cfg: DictConfig) -> None:
 
