@@ -1,14 +1,36 @@
+print("This is the output I hope you see")
 import os
-from keras.models import load_model
-import numpy as np
-
-from ang_loader import load_datasets
-from my_sim import unet
-
-import tensorflow as tf
+from tensorflow.keras.models import load_model
 from tensorflow import keras as K
+from model import unet
+import tensorflow as tf
+print("Loaded tensorflow")
+data_path = os.path.join('..', 'Task01_BrainTumour')
+print(data_path)
+#working to here so far
 
-trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
+crop_dim=128  # Original resolution (240)
+batch_size = 20
+seed=816
+train_test_split=0.60
+
+from dataloader import DatasetGenerator, get_decathlon_filelist
+
+trainFiles, validateFiles, testFiles = get_decathlon_filelist(data_path=data_path, seed=seed)
+# # save trainFiles to a .txt
+# file = open('testFiles.txt','w')
+# for item in testFiles:
+#     file.write(item+'\n')
+# file.close()
+# # These are the correct test files
+
+# # TODO: Fill in the parameters for the dataset generator to return the `testing` data
+ds_test = DatasetGenerator(testFiles, 
+                           batch_size=batch_size, 
+                           crop_dim=[crop_dim, crop_dim], 
+                           augment=False, 
+                           seed=seed)
+
 
 @tf.function
 @K.saving.register_keras_serializable()
@@ -148,51 +170,51 @@ custom_objects = {
     "specificity": specificity
 }
 
-# Path to the saved model
-num_clients = 2
+def evaluate_models(ds, central_model_dir, fl_model_dir):
+    print("method called")
+    # Load the central model
+    # central_model = load_model(central_model_dir, custom_objects=unet().custom_objects)
 
-model_path = f'FLFedAvg_{num_clients}_clients_Best_global_model.keras'
-print(os.path.exists(model_path))
-print(model_path)
+    # Load the FL models
+    fl_model_names = [
+        'FLFedAvg_2_clients_Best_global_model.keras',
+        'FLFedAvg_4_clients_Best_global_model.keras',
+        'FLFedAvg_8_clients_Best_global_model.keras'
+    ]
+    fl_models = [load_model(os.path.join(fl_model_dir, model_name), custom_objects=custom_objects, compile=False) for model_name in fl_model_names]
+    
+    # # Compile the FL models
+    optimizer = K.optimizers.Adam(learning_rate=0.0001)
+    metrics = [dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity]
+    print("Models loaded")
+    for model in fl_models:
+        model.compile(optimizer=optimizer, loss=dice_coef_loss, metrics=metrics)
+    print("Models compiled")
+    # all_models = [central_model] + fl_models
+    names = ['Centralized Model','2 Client Aggregated Model', '4 Client Aggregated Model', '8 Client Aggregated Model']
+    # loss, dice, soft_dice, iou, prec, acc, spec = central_model.evaluate(ds, batch_size=batch_size, verbose=1)
+    # Iterate over each model and evaluate
+    for model, name in zip(fl_models, names):
+        print(f"Evaluating {name}...")
+        loss, dice, soft_dice, iou, prec, acc, spec = model.evaluate(ds, batch_size=batch_size, verbose=0)
+        print(f"Results for {name}:")
+        print(f"Loss: {loss:.4f}")
+        print(f"Dice Coefficient: {dice:.4f}")
+        print(f"Soft Dice Coefficient: {soft_dice:.4f}")
+        print(f"IoU Coefficient: {iou:.4f}")
+        print(f"Precision: {prec:.4f}")
+        print(f"Accuracy: {acc:.4f}")
+        print(f"Specificity: {spec:.4f}")
+        print("-" * 40)
 
-model = load_model(model_path,custom_objects=custom_objects, compile=False)
-print("loaded model")
+central_model_dir = os.path.join('..','unet_model', 'output', '2d_unet_decathlon') # Adjust this path based on where your central model is saved
+fl_model_dir = './FL_Models'  # Directory containing the FL models
 
-optimizer = K.optimizers.Adam(learning_rate=0.0001)
-metrics = [dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity]
+# # Call the function to evaluate the models
+try:
+    # existing evaluation code...
+    evaluate_models(ds_test, central_model_dir, fl_model_dir)
+except Exception as e:
+    print(f"Error during evaluation: {e}")
 
-model.compile(optimizer=optimizer,
-                          loss=dice_coef_loss,
-                          metrics=metrics)
-print("Compiled")
-# Assuming testloader yields data in the form of (input, target)
-
-# Iterate over the testloader
-for i, (batch_inputs, batch_targets) in enumerate(testloader):
-    # Iterate over individual data points in the batch
-    for j in range(batch_inputs.shape[0]):
-        single_input = batch_inputs[j]
-        single_target = batch_targets[j]
-        
-        # The model expects data in batch form, so add an additional dimension to the data
-        single_input = np.expand_dims(single_input, axis=0)
-        single_target = np.expand_dims(single_target, axis=0)
-
-        # Evaluate the model on the single data point
-        scores = model.evaluate(single_input, single_target, verbose=0)
-
-        # Extract and print the scores
-        loss, dice_coef_val, soft_dice_coef_val, iou_coef_val, precision_val, accuracy_val, specificity_val = scores
-        print(f"Batch {i + 1}, Image {j + 1}:")
-        print(f"Loss: {loss}")
-        print(f"Dice Coefficient: {dice_coef_val}")
-        print(f"Soft Dice Coefficient: {soft_dice_coef_val}")
-        print(f"IOU Coefficient: {iou_coef_val}")
-        print(f"Precision: {precision_val}")
-        print(f"Accuracy: {accuracy_val}")
-        print(f"Specificity: {specificity_val}")
-        print("-------------------------------")
-        
-
-
-
+print("ended")

@@ -121,6 +121,8 @@ def accuracy( target, prediction, axis=(1, 2), smooth=0.0001):
 @tf.function
 @K.saving.register_keras_serializable()
 def dice_coef_loss( target, prediction, axis=(1, 2), smooth=0.0001):
+    print("Target shape", target.shape)
+    print("Prediction shape", prediction.shape)
     """
     Sorenson (Soft) Dice loss
     Using -log(Dice) as the loss since it is better behaved.
@@ -159,39 +161,103 @@ def dice_score(y_true, y_pred):
 
 # List of model paths
 model_paths = []  # Add your model paths here
+# model_paths.append("central_model.pb")
+'''
+Traceback (most recent call last):
+  File "/home-mscluster/jstott/Research_Code/Flower_New_Adapted_Flwr_1_5/view_predictions.py", line 170, in <module>
+    models = [load_model(path, custom_objects=custom_objects, compile=False) for path in model_paths]
+  File "/home-mscluster/jstott/Research_Code/Flower_New_Adapted_Flwr_1_5/view_predictions.py", line 170, in <listcomp>
+    models = [load_model(path, custom_objects=custom_objects, compile=False) for path in model_paths]
+  File "/home-mscluster/jstott/anaconda3/envs/flwr_new_tf/lib/python3.9/site-packages/keras/src/saving/saving_api.py", line 262, in load_model
+    return legacy_sm_saving_lib.load_model(
+  File "/home-mscluster/jstott/anaconda3/envs/flwr_new_tf/lib/python3.9/site-packages/keras/src/utils/traceback_utils.py", line 70, in error_handler
+    raise e.with_traceback(filtered_tb) from None
+  File "/home-mscluster/jstott/anaconda3/envs/flwr_new_tf/lib/python3.9/site-packages/h5py/_hl/files.py", line 567, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+  File "/home-mscluster/jstott/anaconda3/envs/flwr_new_tf/lib/python3.9/site-packages/h5py/_hl/files.py", line 231, in make_fid
+    fid = h5f.open(name, flags, fapl=fapl)
+  File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 106, in h5py.h5f.open
+OSError: Unable to open file (file signature not found)
+
+'''
 nums = [2,4,8]
 for i,num in enumerate(nums):
     model_path = f'FLFedAvg_{num}_clients_Best_global_model.keras'
     model_paths.append(model_path)
-# Load models
+# Load models   
 models = [load_model(path, custom_objects=custom_objects, compile=False) for path in model_paths]
 
 # Select 5 slices from different batches
-num_slices = 5
-slices = []
-for i, batch in enumerate(testloader):
-    inputs, targets = batch
-    slices.append((inputs[0], targets[0]))  # taking the first slice from each batch
-    if i == num_slices - 1:
-        break
 
+# slices = []
+# for i, batch in enumerate(testloader):
+#     inputs, targets = batch
+#     slices.append((inputs[0], targets[0]))  # taking the first slice from each batch
+#     if i == num_samples - 1:
+#         break
+num_batches = len(testloader)
+print("Num batches ",num_batches)
+num_slices_per_scan = testloader.num_slices_per_scan
+print("Num slices per scan = ",num_slices_per_scan)
+
+print("haha")
+num_samples = 5
+suitable_samples=0
 # Plot
-fig, axes = plt.subplots(nrows=num_slices, ncols=len(models) + 2, figsize=(15, 15))
+fig, axes = plt.subplots(nrows=num_samples, ncols=len(models) + 2, figsize=(15, 15))
 
-for i, (input_slice, target) in enumerate(slices):
-    axes[i, 0].imshow(input_slice.squeeze(), cmap='gray')
-    axes[i, 0].set_title('Original Image')
-    axes[i, 1].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
-    axes[i, 1].imshow(target.squeeze(), cmap='Reds', alpha=0.5)
-    axes[i, 1].set_title('Ground Truth')
-    
-    for j, model in enumerate(models):
-        prediction = model.predict(input_slice[np.newaxis, ...]).squeeze()
-        dice = dice_score(target.squeeze(), prediction.round())
-        axes[i, j+2].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
-        axes[i, j+2].imshow(prediction, cmap='Reds', alpha=0.5)
-        axes[i, j+2].set_title(f'Model {j+1} Dice: {dice:.3f}')
+for i, batch in enumerate(testloader):
+    if suitable_samples >= num_samples:
+        break  # Stop if you've processed enough batches
+    print("Batch ",i)
+    print("length of batch ",len(batch))
+    input_slices, targets = batch
+    print("length of input slices ",len(input_slices))
+    print("length of targets ",len(targets))
+    count=0
+    while count < len(input_slices): 
+        
+        input_slice = input_slices[count]
+        target = targets[count]
 
+        if not np.any(target):
+            print("empty, skip")
+            count+=1  
+            continue
+
+        # check if dice score is very high or very low based on worst model 
+        print("Sample from batch ", i, " Slice ", count)
+        prediction = models[0].predict(input_slice[np.newaxis, ...],verbose=0)#.squeeze()
+        dice = dice_coef(target, prediction.round()).numpy()
+        print("Dice score = ",dice)
+        if dice>0.8:            
+            print("using sample")
+            # MRI slice
+            axes[suitable_samples, 0].imshow(input_slice.squeeze(), cmap='gray')
+            axes[suitable_samples, 0].set_title('Original Image')
+            # Ground truth
+            if np.any(target):
+                axes[suitable_samples, 1].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
+                axes[suitable_samples, 1].imshow(target.squeeze(), cmap='Reds', alpha=0.5)
+                axes[suitable_samples, 1].set_title('Ground Truth')
+            else:
+                axes[suitable_samples, 1].imshow(input_slice.squeeze(), cmap='gray')
+                axes[suitable_samples, 1].set_title('No Tumour Present')
+            # Predictions
+            for k, model in enumerate(models):
+                prediction = model.predict(input_slice[np.newaxis, ...],verbose=0)#.squeeze()
+                dice = dice_coef(target, prediction.round())
+                axes[suitable_samples, k+2].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
+                axes[suitable_samples, k+2].imshow(prediction.squeeze(), cmap='Reds', alpha=0.5)
+                axes[suitable_samples, k+2].set_title(f'Model {k+1} Dice: {dice:.3f}')
+            suitable_samples+=1
+            count+=50
+            print("Number of samples added = ",suitable_samples)
+          
+
+print("Finished")
 # Adjust and show
 plt.tight_layout()
 import os

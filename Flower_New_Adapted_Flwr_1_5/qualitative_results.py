@@ -1,14 +1,7 @@
-import os
-from keras.models import load_model
+import matplotlib.pyplot as plt
 import numpy as np
-
-from ang_loader import load_datasets
-from my_sim import unet
-
 import tensorflow as tf
 from tensorflow import keras as K
-
-trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
 
 @tf.function
 @K.saving.register_keras_serializable()
@@ -121,6 +114,8 @@ def accuracy( target, prediction, axis=(1, 2), smooth=0.0001):
 @tf.function
 @K.saving.register_keras_serializable()
 def dice_coef_loss( target, prediction, axis=(1, 2), smooth=0.0001):
+    print("Target shape", target.shape)
+    print("Prediction shape", prediction.shape)
     """
     Sorenson (Soft) Dice loss
     Using -log(Dice) as the loss since it is better behaved.
@@ -148,51 +143,76 @@ custom_objects = {
     "specificity": specificity
 }
 
-# Path to the saved model
-num_clients = 2
+def get_suitable_slices(testloader, model, num_samples=10, skip_slices=10):
+    suitable_slices = []
+    suitable_targets = []
+    counter = 0
+    batch_idx = 0
+    
+    while counter < num_samples and batch_idx < len(testloader):
+        batch_data, batch_targets = testloader[batch_idx]
+        print("batch_data shape", batch_data.shape)
+        for slice_idx in range(batch_data.shape[0]):  # iterate over each slice in the batch
+            input_slice = batch_data[slice_idx]
+            target = batch_targets[slice_idx]
+            print("input_slice shape", input_slice.shape, "indx=", slice_idx)
+            
+            prediction = model.predict(input_slice[np.newaxis, ...], verbose=0)
+            dice = dice_coef(target[np.newaxis, ...], prediction.round()).numpy()
+            
+            if dice > 0.8 and np.any(target):  # Check dice score and ensure tumor exists
+                suitable_slices.append(input_slice)
+                suitable_targets.append(target)
+                counter += 1
+                if counter >= num_samples:
+                    break
 
-model_path = f'FLFedAvg_{num_clients}_clients_Best_global_model.keras'
-print(os.path.exists(model_path))
-print(model_path)
+        batch_idx += 1
 
-model = load_model(model_path,custom_objects=custom_objects, compile=False)
-print("loaded model")
-
-optimizer = K.optimizers.Adam(learning_rate=0.0001)
-metrics = [dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity]
-
-model.compile(optimizer=optimizer,
-                          loss=dice_coef_loss,
-                          metrics=metrics)
-print("Compiled")
-# Assuming testloader yields data in the form of (input, target)
-
-# Iterate over the testloader
-for i, (batch_inputs, batch_targets) in enumerate(testloader):
-    # Iterate over individual data points in the batch
-    for j in range(batch_inputs.shape[0]):
-        single_input = batch_inputs[j]
-        single_target = batch_targets[j]
-        
-        # The model expects data in batch form, so add an additional dimension to the data
-        single_input = np.expand_dims(single_input, axis=0)
-        single_target = np.expand_dims(single_target, axis=0)
-
-        # Evaluate the model on the single data point
-        scores = model.evaluate(single_input, single_target, verbose=0)
-
-        # Extract and print the scores
-        loss, dice_coef_val, soft_dice_coef_val, iou_coef_val, precision_val, accuracy_val, specificity_val = scores
-        print(f"Batch {i + 1}, Image {j + 1}:")
-        print(f"Loss: {loss}")
-        print(f"Dice Coefficient: {dice_coef_val}")
-        print(f"Soft Dice Coefficient: {soft_dice_coef_val}")
-        print(f"IOU Coefficient: {iou_coef_val}")
-        print(f"Precision: {precision_val}")
-        print(f"Accuracy: {accuracy_val}")
-        print(f"Specificity: {specificity_val}")
-        print("-------------------------------")
-        
+    return suitable_slices, suitable_targets
 
 
+
+import matplotlib.pyplot as plt
+
+def plot_suitable_slices(models, suitable_slices, suitable_targets):
+    num_samples = len(suitable_slices)
+    fig, axes = plt.subplots(num_samples, len(models) + 2, figsize=(15, 15))
+    
+    for i, (input_slice, target) in enumerate(zip(suitable_slices, suitable_targets)):
+        # MRI slice
+        axes[i, 0].imshow(input_slice.squeeze(), cmap='gray')
+        axes[i, 0].set_title('Original Image')
+        # Ground truth
+        axes[i, 1].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
+        axes[i, 1].imshow(target.squeeze(), cmap='Reds', alpha=0.5)
+        axes[i, 1].set_title('Ground Truth')
+        # Predictions
+        for k, model in enumerate(models):
+            prediction = model.predict(input_slice[np.newaxis, ...], verbose=0)
+            dice = dice_coef(target, prediction.round())
+            axes[i, k+2].imshow(input_slice.squeeze(), cmap='gray', alpha=0.5)
+            axes[i, k+2].imshow(prediction.squeeze(), cmap='Reds', alpha=0.5)
+            axes[i, k+2].set_title(f'Model {k+1} Dice: {dice:.3f}')
+    
+    plt.tight_layout()
+    plt.show()
+
+# Assume models is a list containing all your models
+from ang_loader import load_datasets
+from keras.models import load_model
+
+trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=1,  val_ratio=0.1)
+model_paths = []
+nums = [2,4,8]
+for i,num in enumerate(nums):
+    model_path = f'FLFedAvg_{num}_clients_Best_global_model.keras'
+    model_paths.append(model_path)
+# Load models   
+models = [load_model(path, custom_objects=custom_objects, compile=False) for path in model_paths]
+suitable_slices, suitable_targets = get_suitable_slices(testloader, models[0])
+if len(suitable_slices) == 0:
+    print("No suitable slices found that meet the criteria.")
+else:
+    plot_suitable_slices(models, suitable_slices, suitable_targets)
 

@@ -1,14 +1,14 @@
 import os
-from keras.models import load_model
 import numpy as np
-
-from ang_loader import load_datasets
-from my_sim import unet
-
 import tensorflow as tf
+from tensorflow.keras.models import load_model
+from model import unet
+from dataloader import DatasetGenerator, get_decathlon_filelist
 from tensorflow import keras as K
-
-trainloaders, valloaders, valloader_global, testloader, input_shape, output_shape = load_datasets(num_partitions=2,batch_size=20,  val_ratio=0.1)
+# Ensure GPU memory growth is limited to avoid out-of-memory issues
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+if physical_devices:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 @tf.function
 @K.saving.register_keras_serializable()
@@ -148,51 +148,73 @@ custom_objects = {
     "specificity": specificity
 }
 
-# Path to the saved model
-num_clients = 2
+# Constants and paths
+data_path = os.path.join('..', 'Task01_BrainTumour')
+crop_dim = 128
+batch_size = 20
+seed = 816
 
-model_path = f'FLFedAvg_{num_clients}_clients_Best_global_model.keras'
-print(os.path.exists(model_path))
-print(model_path)
+# Get file lists
+trainFiles, validateFiles, testFiles = get_decathlon_filelist(data_path=data_path, seed=seed)
 
-model = load_model(model_path,custom_objects=custom_objects, compile=False)
-print("loaded model")
+# Generate testing dataset
+ds_test = DatasetGenerator(testFiles, batch_size=batch_size, crop_dim=[crop_dim, crop_dim], augment=False, seed=seed)
 
+# Load the model with custom objects
+# central_model_path = os.path.join('..','unet_model', 'output', '2d_unet_decathlon')  # Adjust this path based on where your central model is saved
+# central_model = load_model(central_model_path, custom_objects=unet().custom_objects)
+
+fl_model = load_model('FL_Models/FLFedAvg_8_clients_Best_global_model.keras', custom_objects=custom_objects, compile=False)
+print("FL models loaded")
 optimizer = K.optimizers.Adam(learning_rate=0.0001)
 metrics = [dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity]
 
-model.compile(optimizer=optimizer,
-                          loss=dice_coef_loss,
-                          metrics=metrics)
-print("Compiled")
-# Assuming testloader yields data in the form of (input, target)
+# for model in fl_models:
+fl_model.compile(optimizer=optimizer, loss=dice_coef_loss, metrics=metrics)
+print("FL models compiled")
 
-# Iterate over the testloader
-for i, (batch_inputs, batch_targets) in enumerate(testloader):
-    # Iterate over individual data points in the batch
-    for j in range(batch_inputs.shape[0]):
-        single_input = batch_inputs[j]
-        single_target = batch_targets[j]
+def calc_dice(target, prediction, smooth=0.0001):
+    """
+    Sorensen Dice coefficient using numpy for individual slices
+    """
+    prediction = np.round(prediction)
+
+    numerator = 2.0 * np.sum(target * prediction) + smooth
+    denominator = np.sum(target) + np.sum(prediction) + smooth
+    coef = numerator / denominator
+
+    return coef
+
+dice_scores = []
+
+# Loop through all slices in the dataset. this is the same as .evaluate for the dice score
+# for batch_images, batch_labels in ds_test:
+#     for idx in range(batch_images.shape[0]):  # Loop over each slice in the batch
+#         prediction_slice = fl_model.predict(batch_images[idx:idx+1])
+#         dice_score = calc_dice(batch_labels[idx,:,:,0], prediction_slice[0,:,:,0])
         
-        # The model expects data in batch form, so add an additional dimension to the data
-        single_input = np.expand_dims(single_input, axis=0)
-        single_target = np.expand_dims(single_target, axis=0)
-
-        # Evaluate the model on the single data point
-        scores = model.evaluate(single_input, single_target, verbose=0)
-
-        # Extract and print the scores
-        loss, dice_coef_val, soft_dice_coef_val, iou_coef_val, precision_val, accuracy_val, specificity_val = scores
-        print(f"Batch {i + 1}, Image {j + 1}:")
-        print(f"Loss: {loss}")
-        print(f"Dice Coefficient: {dice_coef_val}")
-        print(f"Soft Dice Coefficient: {soft_dice_coef_val}")
-        print(f"IOU Coefficient: {iou_coef_val}")
-        print(f"Precision: {precision_val}")
-        print(f"Accuracy: {accuracy_val}")
-        print(f"Specificity: {specificity_val}")
-        print("-------------------------------")
+#         if dice_score > 0.7:
+#             print(f"Dice score for slice {idx}: {dice_score:.4f}")
         
+#         dice_scores.append(dice_score)
 
+# # Compute the average Dice score across all slices
+# average_dice_score = np.mean(dice_scores)
 
+# print(f"Average Dice Coefficient (per slice): {average_dice_score:.4f}")
+
+# Evaluate the model
+loss, dice, soft_dice, iou, prec, acc, spec = fl_model.evaluate(ds_test, batch_size=batch_size, verbose=1)  # Assuming dice coefficient is the only metric for simplicity
+
+#print all metrics
+print("Loss: ", loss)
+print("Dice Coefficient: ", dice)
+print("Soft Dice Coefficient: ", soft_dice)
+print("IoU Coefficient: ", iou)
+print("Precision: ", prec)
+print("Accuracy: ", acc)
+print("Specificity: ", spec)
+
+print(metrics)
+print("8 client model")
 
