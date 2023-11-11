@@ -164,7 +164,7 @@ ds_test = DatasetGenerator(testFiles, batch_size=batch_size, crop_dim=[crop_dim,
 # central_model_path = os.path.join('..','unet_model', 'output', '2d_unet_decathlon')  # Adjust this path based on where your central model is saved
 # central_model = load_model(central_model_path, custom_objects=unet().custom_objects)
 
-fl_model = load_model('FL_Models/FLFedAvg_8_clients_Best_global_model.keras', custom_objects=custom_objects, compile=False)
+fl_model = load_model('FL_Models/FLFedAvg_2_clients_Best_global_model.keras', custom_objects=custom_objects, compile=False)
 print("FL models loaded")
 optimizer = K.optimizers.Adam(learning_rate=0.0001)
 metrics = [dice_coef, soft_dice_coef, iou_coef, precision, accuracy, specificity]

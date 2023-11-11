@@ -700,7 +700,7 @@ class MyServer(FlowerServer):
                     params = parameters_to_ndarrays(self.parameters)
                     self._save_model(params)
                     params = parameters_to_ndarrays(self.best_parameters)
-                    self.save_modelbest(params)
+                    self._save_modelbest(params)
                     self.global_parameters = deepcopy(params)
                     early_stopping_triggered = True
                     break
